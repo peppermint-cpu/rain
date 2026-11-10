@@ -65,7 +65,7 @@ addEventListener('resize', resize); resize();
 
 /* ---------- 플레이어 ---------- */
 const myId = Math.random().toString(36).slice(2, 8);
-const mk = (x) => ({x, y:0, vx:0, vy:0, f:1, hp:100, walk:0, moving:false, pt:-1, w:1, rc:0, pu:false, hitDone:false, flash:0, stun:0, tx:x, ty:0, seen:performance.now(), g:false, bf:0, bt:0, sw:false, n:''});
+const mk = (x) => ({x, y:0, vx:0, vy:0, f:1, hp:100, walk:0, moving:false, pt:-1, w:1, rc:0, pu:false, hitDone:false, flash:0, stun:0, tx:x, ty:0, seen:performance.now(), g:false, bf:0, bt:0, sw:false, n:'', arrows:[]});
 const me = mk(WORLD/2 + (Math.random()-.5)*600);
 me.gt = 0; me.gg = 100; me.glock = false; me.pcd = 0; me.pOk = false; me.n = '플레이어';
 const others = {};
@@ -93,7 +93,7 @@ const bullets = [], muz = [], regen = [];
 
 /* ---------- 이펙트 상태 ---------- */
 const craters = [], debris = [], dust = [], streaks = [], rings = [];
-const sparks = [], bursts = [], texts = [];
+const sparks = [], bursts = [], texts = [], blood = [], mists = [], stains = [];
 let shake = 0, slow = 0, ifl = 0, rainWind = 0;
 
 // 크레이터가 반영된 지면 높이 (아래쪽이 +)
@@ -219,17 +219,19 @@ function impactFx(x, f, ground, s){
 
 /* ---------- 타격 이펙트 (스파크, 데미지 숫자, 사운드) ----------
    type 0 일반 타격 / 1 방패 막기 / 2 패링 / 3 가드 브레이크 */
-function hitFx(x, y, type, pw, dmg, dir){
-  const cy = y - 56;
+function hitFx(x, y, type, pw, dmg, dir, ar, hy){
+  const cy = y - 56, by = y - (ar && hy ? hy : 56);
   const vol = Math.max(0, 1 - Math.abs(x - me.x) / 900);
   const c = type === 1 ? '190,220,255' : type === 2 ? '255,235,120' : type === 3 ? '255,170,80' : '255,228,170';
-  const n = type === 0 ? 6 + Math.round(pw * 16) : type === 2 ? 18 : type === 3 ? 20 : 8;
+  const n = type === 0 ? (ar ? 3 : 6 + Math.round(pw * 16)) : type === 2 ? 18 : type === 3 ? 20 : 8;
   const sgn = type === 0 ? dir : -dir;
   for (let i = 0; i < n; i++){
     const a = (Math.random() - .5) * 2.4, sp = 220 + Math.random() * (300 + pw * 450);
     sparks.push({x:x - dir * 4, y:cy + (Math.random() - .5) * 14, vx:Math.cos(a) * sp * sgn, vy:Math.sin(a) * sp - 50, t:0, life:.18 + Math.random() * .25, w:1 + Math.random() * 1.6, c});
   }
   bursts.push({x, y:cy, t:0, r:12 + pw * 34 + (type === 2 ? 16 : 0), c});
+  if ((type === 0 || type === 3) && dmg > 0) bleed(x, by, dir, pw, !!ar);
+  if (ar && type === 0) sndThunk(vol);
   if (type === 0 && pw > .5) rings.push({x, y:cy, f:dir, t:0, s:.3 + pw * .3});
   const label = type === 2 ? 'PARRY!' : type === 3 ? 'BREAK!' : type === 1 ? (dmg > 0 ? 'BLOCK ' + dmg : 'BLOCK') : String(dmg);
   texts.push({x:x + (Math.random() - .5) * 14, y:cy - 34, v:label, t:0, sz:type === 0 ? 14 + Math.round(dmg * .55) : 15, c:type === 0 ? '#ffe9b8' : type === 1 ? '#bcd8ff' : type === 2 ? '#ffe36a' : '#ffae55'});
@@ -238,6 +240,51 @@ function hitFx(x, y, type, pw, dmg, dir){
     if (type === 2) ifl = Math.max(ifl, .12 * vol);
   }
   if (type === 0) sndHit(vol, pw); else if (type === 1) sndBlock(vol); else if (type === 2) sndParry(vol); else sndBreak(vol);
+}
+
+/* ---------- 피 이펙트 + 몸에 박히는 화살 ---------- */
+// 피: 튀어 오르다 바닥에 떨어지면 핏자국으로 남음
+function bleed(x, y, dir, pw, ar){
+  if (blood.length > 320) blood.splice(0, 60);
+  const n = 7 + Math.round(pw * 14) + (ar ? 8 : 0);
+  for (let i = 0; i < n; i++){
+    const a = (Math.random() - .5) * 2.0, sp = 120 + Math.random() * (260 + pw * 320), sg = Math.random() < .7 ? dir : -dir;
+    blood.push({x:x + (Math.random() - .5) * 6, y:y + (Math.random() - .5) * 10, vx:Math.cos(a) * sp * sg, vy:Math.sin(a) * sp - 90 - Math.random() * 120, r:1.2 + Math.random() * 2.2, t:0, life:.9 + Math.random() * .7});
+  }
+  for (let i = 0; i < 4; i++) mists.push({x, y, vx:dir * (40 + Math.random() * 80), vy:-Math.random() * 40, r:4 + Math.random() * 5, t:0, max:.3 + Math.random() * .2});
+}
+// 화살이 몸에 박힘 (최대 6개, 10초 뒤 사라짐)
+function addArrow(p, dir, hy){
+  if (p.arrows.length >= 6) p.arrows.shift();
+  p.arrows.push({d:dir, ox:dir * 2, oy:Math.max(8, Math.min(88, hy || 50)), tilt:(Math.random() - .5) * .3, t:0, life:10, drip:.05});
+}
+// 박힌 화살에서 피가 뚝뚝 떨어짐
+function tickArrows(p, dt){
+  for (let i = p.arrows.length - 1; i >= 0; i--){
+    const a = p.arrows[i]; a.t += dt;
+    if (a.t < 6){
+      a.drip -= dt;
+      if (a.drip <= 0){
+        a.drip = .18 + Math.random() * .25;
+        if (blood.length < 320) blood.push({x:p.x + a.ox, y:p.y - a.oy + 2, vx:(Math.random() - .5) * 20, vy:0, r:1.3 + Math.random(), t:0, life:1.2});
+      }
+    }
+    if (a.t > a.life) p.arrows.splice(i, 1);
+  }
+}
+function drawArrows(p){
+  for (const a of p.arrows){
+    const tx = p.x + a.ox, ty = p.y - a.oy, ex = tx - a.d * 22, ey = ty + a.tilt * 22;
+    ctx.save(); ctx.globalAlpha *= Math.min(1, (a.life - a.t) / 1);
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = '#8a6f4a'; ctx.lineWidth = 2.2;
+    ctx.beginPath(); ctx.moveTo(tx, ty); ctx.lineTo(ex, ey); ctx.stroke();
+    ctx.strokeStyle = '#d8d2c2'; ctx.lineWidth = 1.6;
+    const fx = tx - a.d * 17, fy = ty + a.tilt * 17;
+    ctx.beginPath(); ctx.moveTo(fx, fy); ctx.lineTo(ex - a.d * 2, ey - 3.5); ctx.moveTo(fx, fy); ctx.lineTo(ex - a.d * 2, ey + 3.5); ctx.stroke();
+    ctx.fillStyle = 'rgba(160,18,18,.95)'; ctx.beginPath(); ctx.arc(tx - a.d * 2, ty, 2.6, 0, 7); ctx.fill();
+    ctx.restore();
+  }
 }
 
 // 공격한 쪽이 받는 피드백 (히트스톱, 진동, 패링당하면 휘청)
@@ -278,10 +325,11 @@ function takeHit(p){
     if (st > .1){ me.pt = -1; me.sw = false; me.cd = Math.min(me.cd, .35); }
   }
   if (me.hp <= 0){ deadT = 1.8; me.g = false; }
-  hitFx(me.x, me.y, type, pw, dmg, p.dir);
+  hitFx(me.x, me.y, type, pw, dmg, p.dir, p.ar, p.hy);
+  if (p.ar && (type === 0 || type === 3)) addArrow(me, p.dir, p.hy);
   slow = Math.max(slow, .03 + .07 * pw);
   if (navigator.vibrate){ try { navigator.vibrate(type === 0 ? 30 + Math.round(pw * 50) : 20); } catch(e){} }
-  if (online) channel.send({type:'broadcast', event:'ht', payload:{x:+me.x.toFixed(1), y:+me.y.toFixed(1), t:type, d:dmg, pw:+pw.toFixed(2), f:p.dir, a:p.a, v:myId, m:p.m ? 1 : 0}});
+  if (online) channel.send({type:'broadcast', event:'ht', payload:{x:+me.x.toFixed(1), y:+me.y.toFixed(1), t:type, d:dmg, pw:+pw.toFixed(2), f:p.dir, a:p.a, v:myId, m:p.m ? 1 : 0, ar:p.ar ? 1 : 0, hy:p.hy}});
   sendState(true);
 }
 
@@ -295,6 +343,7 @@ function connect(){
   channel.on('broadcast', {event:'s'}, ({payload:p}) => {
     let o = others[p.i];
     if (!o){ o = others[p.i] = mk(p.x); o.ty = p.y; o.y = p.y; }
+    if (o.hp <= 0 && p.h > 0) o.arrows = [];
     o.tx = p.x; o.ty = p.y; o.f = p.f; o.hp = p.h; o.w = p.w || 0; o.moving = p.m; o.g = !!p.g; o.n = String(p.n || '').slice(0, 10); o.seen = performance.now();
     if (p.pu && !o.pu && o.pt < 0){ o.pt = 0; o.sw = false; } o.pu = p.pu;
   });
@@ -303,9 +352,12 @@ function connect(){
     takeHit(p);
   });
   channel.on('broadcast', {event:'ht'}, ({payload:p}) => {
-    hitFx(p.x, p.y, p.t, p.pw, p.d, p.f);
+    hitFx(p.x, p.y, p.t, p.pw, p.d, p.f, p.ar, p.hy);
     const o = others[p.v];
-    if (o){ o.bf = .18; o.bt = p.t; if (p.t === 0 || p.t === 3) o.flash = .12; }
+    if (o){
+      o.bf = .18; o.bt = p.t; if (p.t === 0 || p.t === 3) o.flash = .12;
+      if (p.ar && (p.t === 0 || p.t === 3)) addArrow(o, p.f, p.hy);
+    }
     if (p.a === myId) attackerFeedback(p);
   });
   channel.on('broadcast', {event:'b'}, ({payload:p}) => {
@@ -380,7 +432,7 @@ function update(dt){
     deadT -= dt;
     if (deadT <= 0){
       me.hp = 100; me.x = 300 + Math.random() * (WORLD - 600); me.y = 0; me.vx = me.vy = 0; me.pt = -1; me.stun = 0;
-      me.g = false; me.gg = 100; me.glock = false; me.ammo = WEAPONS.map(w => w.max || 0);
+      me.g = false; me.gg = 100; me.glock = false; me.arrows = []; me.ammo = WEAPONS.map(w => w.max || 0);
     }
   }
   me.vy += GRAV * dt; me.x += me.vx * dt; me.y += me.vy * dt;
@@ -391,6 +443,7 @@ function update(dt){
   if (me.moving) me.walk += dt * 11;
   me.flash = Math.max(0, me.flash - dt);
   me.bf = Math.max(0, me.bf - dt);
+  tickArrows(me, dt);
 
   // 무기: 공격 입력, 근접 판정, 화살
   me.cd = Math.max(0, me.cd - dt); me.rc = Math.max(0, me.rc - dt);
@@ -412,7 +465,7 @@ function update(dt){
         const o = others[id];
         if (o.hp > 0 && o.x > lo && o.x < hi && b.y > o.y - 90 && b.y < o.y){
           const dm = Math.abs(b.x - b.sx) < 140 ? .6 : 1;   // 너무 가까우면 위력 감소
-          channel.send({type:'broadcast', event:'hit', payload:{to:id, dir:b.f, dmg:Math.max(1, Math.round(b.dmg * dm)), kb:b.kb, st:b.st, gm:b.gm, m:0, a:myId}});
+          channel.send({type:'broadcast', event:'hit', payload:{to:id, dir:b.f, dmg:Math.max(1, Math.round(b.dmg * dm)), kb:b.kb, st:b.st, gm:b.gm, m:0, a:myId, ar:1, hy:Math.round(Math.max(8, Math.min(88, o.y - b.y)))}});
           dead = true; break;
         }
       }
@@ -451,6 +504,17 @@ function update(dt){
   }
   for (let i = bursts.length - 1; i >= 0; i--){ bursts[i].t += dt; if (bursts[i].t > .14) bursts.splice(i, 1); }
   for (let i = texts.length - 1; i >= 0; i--){ const t = texts[i]; t.t += dt; t.y -= 45 * dt; if (t.t > .75) texts.splice(i, 1); }
+  // 피 방울: 중력으로 떨어지다 바닥에 닿으면 핏자국
+  for (let i = blood.length - 1; i >= 0; i--){
+    const b = blood[i]; b.t += dt; b.vy += 1100 * dt; b.x += b.vx * dt; b.y += b.vy * dt;
+    if (b.y > gy(b.x)){
+      if (stains.length < 90) stains.push({x:b.x, w:b.r * (2 + Math.random() * 3), t:0, life:14});
+      blood.splice(i, 1); continue;
+    }
+    if (b.t > b.life) blood.splice(i, 1);
+  }
+  for (let i = mists.length - 1; i >= 0; i--){ const m = mists[i]; m.t += dt; m.x += m.vx * dt; m.y += m.vy * dt; m.r += 18 * dt; if (m.t > m.max) mists.splice(i, 1); }
+  for (let i = stains.length - 1; i >= 0; i--){ stains[i].t += dt; if (stains[i].t > stains[i].life) stains.splice(i, 1); }
 
   // 다른 플레이어 보간
   const now = performance.now();
@@ -471,6 +535,7 @@ function update(dt){
       }
     }
     o.flash = Math.max(0, o.flash - dt); o.bf = Math.max(0, o.bf - dt);
+    tickArrows(o, dt);
   }
 }
 
@@ -585,6 +650,7 @@ function person(p, label){
     if (t >= 0 && !wp.sp && t >= wp.w1 && t < wp.w2 + .04) swingTrail(wp, fx, fy, f, ba);
     drawWeapon(wp, fx, fy, f, ba);
   }
+  drawArrows(p);
   ctx.restore();
   // 체력바 + 닉네임
   if (p.hp > 0){
@@ -638,6 +704,10 @@ function sndHit(v, pw){
   if (!ac || v <= 0) return;
   tn(170, 48, .16 + pw * .1, (.45 + pw * .6) * v, 'sine');
   nz(.09 + pw * .08, 1800, 'lowpass', (.5 + pw * .4) * v, 3);
+}
+function sndThunk(v){
+  if (!ac || v <= 0) return;
+  tn(320, 110, .09, .35 * v, 'triangle'); nz(.04, 1200, 'lowpass', .3 * v, 2);
 }
 function sndBlock(v){
   if (!ac || v <= 0) return;
@@ -772,6 +842,11 @@ function frame(t){
     ctx.fillStyle = 'rgba(200,215,235,' + (0.6 * (1 - k)) + ')';
     ctx.fillRect(sp.x - k * 8 * sp.s, sy0 - h - 1, 1.5, 1.5); ctx.fillRect(sp.x + k * 8 * sp.s, sy0 - h * .8 - 1, 1.5, 1.5);
   }
+  // 바닥에 남은 핏자국
+  for (const s of stains){
+    ctx.fillStyle = 'rgba(110,12,12,' + (Math.min(1, (s.life - s.t) / 4) * .85) + ')';
+    ctx.beginPath(); ctx.ellipse(s.x, gy(s.x) + .5, s.w, s.w * .22, 0, 0, 7); ctx.fill();
+  }
   // 캐릭터 (내 닉네임 앞에는 🟢 온라인 표시)
   for (const id in others) person(others[id], others[id].n || id.slice(0, 3));
   person(me, '🟢 ' + me.n);
@@ -820,6 +895,14 @@ function frame(t){
     }
     ctx.stroke();
     ctx.fillStyle = 'rgba(255,255,255,' + (a * .8) + ')'; ctx.beginPath(); ctx.arc(b.x, b.y, b.r * .5 * (1 - k * .4), 0, 7); ctx.fill();
+  }
+  for (const m of mists){
+    ctx.fillStyle = 'rgba(150,15,15,' + (.35 * (1 - m.t / m.max)) + ')';
+    ctx.beginPath(); ctx.arc(m.x, m.y, m.r, 0, 7); ctx.fill();
+  }
+  for (const b of blood){
+    ctx.fillStyle = 'rgba(175,22,22,' + Math.min(1, (b.life - b.t) / .3) + ')';
+    ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, 7); ctx.fill();
   }
   for (const s of sparks){
     ctx.strokeStyle = 'rgba(' + s.c + ',' + Math.max(0, 1 - s.t / s.life) + ')'; ctx.lineWidth = s.w; ctx.lineCap = 'round';

@@ -1,0 +1,573 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Rain Arena</title>
+<style>
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-select:none;touch-action:none}
+  html,body{margin:0;height:100%;overflow:hidden;background:#25282c;font-family:system-ui,sans-serif}
+  canvas{position:fixed;inset:0;width:100%;height:100%;display:block}
+  #hud{position:fixed;top:calc(env(safe-area-inset-top,0px) + 10px);left:12px;right:12px;display:flex;justify-content:space-between;align-items:flex-start;color:#9aa0a8;font-size:13px;pointer-events:none}
+  #hpbox{width:140px;height:12px;background:rgba(0,0,0,.6);border-radius:6px;overflow:hidden}
+  #hp{height:100%;width:100%;background:#a33;transition:width .15s}
+  #msg{text-align:right;line-height:1.4}
+  .btn{position:fixed;bottom:calc(env(safe-area-inset-bottom,0px) + 24px);width:76px;height:76px;border-radius:50%;background:rgba(0,0,0,.55);border:2px solid rgba(255,255,255,.25);color:#fff;font-size:30px;display:flex;align-items:center;justify-content:center}
+  .btn.on{background:rgba(255,255,255,.35)}
+  #bl{left:18px}#br{left:106px}
+  #bj{right:104px}#bp{right:18px;width:84px;height:84px;font-size:36px}
+  #inv{position:fixed;top:calc(env(safe-area-inset-top,0px) + 62px);right:12px;width:46px;height:46px;border-radius:50%;background:rgba(0,0,0,.6);border:2px solid rgba(255,255,255,.2);color:#fff;font-size:22px;display:flex;align-items:center;justify-content:center;z-index:5}
+  #invp{position:fixed;inset:0;background:rgba(0,0,0,.72);display:none;align-items:center;justify-content:center;z-index:10}
+  .grid{display:grid;grid-template-columns:repeat(3,92px);gap:10px}
+  .slot{background:#1b1d20;border:2px solid #3a3d42;border-radius:12px;padding:10px 4px;text-align:center;color:#ccc}
+  .slot.sel{border-color:#c33}
+  .si{font-size:30px}.sn{font-size:13px;margin-top:4px}.sa{font-size:11px;color:#8a9099;margin-top:2px}
+  #wl{margin-top:6px}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hud"><div><div id="hpbox"><div id="hp"></div></div><div id="wl"></div></div><div id="msg"></div></div>
+<div class="btn" id="bl">◀</div><div class="btn" id="br">▶</div>
+<div class="btn" id="bj">⤒</div><div class="btn" id="bp">👊</div>
+<div id="inv">🎒</div><div id="invp"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script>
+/* ===== 설정: Supabase 프로젝트 값으로 교체하세요 ===== */
+const SUPABASE_URL = "https://YOUR_PROJECT.supabase.co";
+const SUPABASE_ANON_KEY = "YOUR_ANON_KEY";
+/* ================================================== */
+
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+const hpEl = document.getElementById('hp'), msgEl = document.getElementById('msg'), wlEl = document.getElementById('wl'), invp = document.getElementById('invp'), bpEl = document.getElementById('bp');
+const WORLD = 3000, GRAV = 1500, SPEED = 190, JUMP = 560, PT = 0.4;
+let W, H, DPR, scale;
+function resize(){
+  DPR = Math.min(devicePixelRatio || 1, 2);
+  W = innerWidth; H = innerHeight;
+  cv.width = W * DPR; cv.height = H * DPR;
+  scale = Math.min(H / 420, W / 380) ;
+}
+addEventListener('resize', resize); resize();
+
+/* ---------- 플레이어 ---------- */
+const myId = Math.random().toString(36).slice(2, 8);
+const mk = (x) => ({x, y:0, vx:0, vy:0, f:1, hp:100, walk:0, moving:false, pt:-1, w:0, rc:0, pu:false, hitDone:false, flash:0, stun:0, tx:x, ty:0, seen:performance.now()});
+const me = mk(WORLD/2 + (Math.random()-.5)*600);
+const others = {};
+let deadT = 0;
+
+/* ---------- 무기 ---------- */
+const WEAPONS = [
+  {n:'주먹',ic:'👊',t:'m',dmg:10,dur:.4,w1:.25,w2:.5,reach:52,kb:260},
+  {n:'진심펀치',ic:'💥',t:'m',dmg:35,dur:.9,w1:.62,w2:.74,reach:64,kb:800,big:1},
+  {n:'야구배트',ic:'🏏',t:'m',dmg:20,dur:.55,w1:.3,w2:.55,reach:80,kb:400,bat:1},
+  {n:'권총',ic:'🔫',t:'g',dmg:15,cd:.35,max:12,rg:1.2,spd:1000,pel:1,spr:0,life:.9,kb:140,len:12},
+  {n:'샷건',ic:'🧨',t:'g',dmg:9,cd:.9,max:6,rg:2.2,spd:800,pel:5,spr:.18,life:.28,kb:220,len:26},
+];
+me.ammo = WEAPONS.map(w => w.max || 0); me.cd = 0;
+const bullets = [], muz = [], regen = [];
+
+/* ---------- 이펙트 상태 (진심펀치) ---------- */
+const craters = [], debris = [], dust = [], streaks = [], rings = [];
+let shake = 0, slow = 0, ifl = 0, rainWind = 0;
+
+// 크레이터가 반영된 지면 높이 (아래쪽이 +)
+function craterH(c, d){
+  const u = d / c.r;
+  if (u < 1){ const v = 1 - u * u; return c.d * c.k * v * v; }
+  if (u < 1.45) return -c.d * c.k * .2 * Math.sin((u - 1) / .45 * Math.PI);
+  return 0;
+}
+function gy(x){
+  let h = 0;
+  for (let i = 0; i < craters.length; i++){
+    const c = craters[i], d = Math.abs(x - c.x);
+    if (d < c.r * 1.45) h += craterH(c, d);
+  }
+  return h;
+}
+
+/* ---------- 입력 ---------- */
+const keys = {L:false, R:false, A:false};
+let wantJump = false;
+function bindBtn(id, down, up){
+  const el = document.getElementById(id);
+  const d = e => { e.preventDefault(); el.classList.add('on'); down(); };
+  const u = e => { e.preventDefault(); el.classList.remove('on'); up && up(); };
+  el.addEventListener('pointerdown', d);
+  ['pointerup','pointercancel','pointerleave'].forEach(t => el.addEventListener(t, u));
+}
+bindBtn('bl', () => keys.L = true,  () => keys.L = false);
+bindBtn('br', () => keys.R = true,  () => keys.R = false);
+bindBtn('bj', () => wantJump = true, () => wantJump = false);
+bindBtn('bp', () => keys.A = true, () => keys.A = false);
+addEventListener('keydown', e => {
+  if (e.repeat) return;
+  if (['ArrowLeft','a','A'].includes(e.key)) keys.L = true;
+  if (['ArrowRight','d','D'].includes(e.key)) keys.R = true;
+  if (['ArrowUp','w','W',' '].includes(e.key)) wantJump = true;
+  if (['j','J','k','K'].includes(e.key)) keys.A = true;
+  if (e.key >= '1' && e.key <= '5') selW(+e.key - 1);
+  if (e.key === 'i' || e.key === 'I') toggleInv();
+});
+addEventListener('keyup', e => {
+  if (['ArrowLeft','a','A'].includes(e.key)) keys.L = false;
+  if (['ArrowRight','d','D'].includes(e.key)) keys.R = false;
+  if (['ArrowUp','w','W',' '].includes(e.key)) wantJump = false;
+  if (['j','J','k','K'].includes(e.key)) keys.A = false;
+});
+function attack(){
+  if (me.hp <= 0 || me.cd > 0 || me.pt >= 0 || me.stun > 0) return;
+  const wp = WEAPONS[me.w];
+  if (wp.t === 'm'){ me.pt = 0; me.hitDone = false; me.cd = wp.dur + .05; sendState(true); return; }
+  if (me.ammo[me.w] < 1) return;
+  me.ammo[me.w]--; me.cd = wp.cd; me.rc = .12;
+  spawnShot(me.x, me.y, me.f, me.w, true);
+  if (online) channel.send({type:'broadcast', event:'b', payload:{i:myId, x:me.x, y:me.y, f:me.f, k:me.w}});
+}
+function spawnShot(x, y, f, k, own){
+  const wp = WEAPONS[k];
+  for (let i = 0; i < wp.pel; i++){
+    const a = (Math.random() - .5) * 2 * wp.spr;
+    bullets.push({x:x + f * 40, y:y - 60, vx:Math.cos(a) * wp.spd * f, vy:Math.sin(a) * wp.spd, life:wp.life, own, dmg:wp.dmg, kb:wp.kb, f});
+  }
+  muz.push({x:x + f * 44, y:y - 60, t:.08});
+}
+function renderInv(){
+  invp.innerHTML = '<div class="grid">' + WEAPONS.map((w, i) => '<div class="slot' + (i === me.w ? ' sel' : '') + '" data-i="' + i + '"><div class="si">' + w.ic + '</div><div class="sn">' + w.n + '</div><div class="sa">' + (w.t === 'g' ? me.ammo[i] + '/' + w.max : '근접') + '</div></div>').join('') + '</div>';
+}
+function toggleInv(){ const on = invp.style.display !== 'flex'; invp.style.display = on ? 'flex' : 'none'; if (on) renderInv(); }
+function selW(i){ if (!WEAPONS[i]) return; me.w = i; me.pt = -1; bpEl.textContent = WEAPONS[i].ic; invp.style.display = 'none'; sendState(true); }
+invp.addEventListener('click', e => { const sl = e.target.closest('.slot'); if (sl) selW(+sl.dataset.i); else toggleInv(); });
+document.getElementById('inv').addEventListener('pointerdown', e => { e.preventDefault(); toggleInv(); });
+
+/* ---------- 진심펀치 충격 이펙트 ---------- */
+// 풍압(충격파 링 + 바람줄기 + 먼지), 지면 파괴(크레이터 + 균열 + 파편), 화면 흔들림, 히트스톱, 사운드
+function impactFx(x, f, ground){
+  const gh = gy(x);
+  rings.push({x, y:gh - 56, f, t:0});
+  for (let i = 0; i < 14; i++) streaks.push({x:x + f * Math.random() * 18, y:gh - 8 - Math.random() * 100, vx:f * (700 + Math.random() * 600), len:30 + Math.random() * 60, t:0});
+  for (let i = 0; i < 12; i++) dust.push({x:x + (Math.random() - .5) * 40, y:gh - 4, vx:f * (80 + Math.random() * 280) + (Math.random() - .5) * 60, vy:-Math.random() * 70, r:5 + Math.random() * 6, t:0, max:.5 + Math.random() * .5});
+  if (ground){
+    const r = 68 + Math.random() * 16, cracks = [];
+    for (let i = 0; i < 9; i++){
+      const side = i % 2 ? 1 : -1, pts = [], n = 3 + Math.floor(Math.random() * 3);
+      for (let j = 0; j < n; j++) pts.push([side * (Math.random() * 18 - 3), 5 + Math.random() * 10]);
+      cracks.push({x:side * r * (.3 + Math.random() * 1.1), p:pts});
+    }
+    if (craters.length >= 14) craters.shift();
+    craters.push({x, r, d:24 + Math.random() * 6, age:0, life:26, k:0, cracks});
+    for (let i = 0; i < 20; i++) debris.push({x:x + (Math.random() - .5) * 50, y:gh - 2, vx:(Math.random() - .5) * 320 + f * 160, vy:-(260 + Math.random() * 520), s:2.5 + Math.random() * 5, rot:Math.random() * 6, vr:(Math.random() - .5) * 14, t:0, life:1.4 + Math.random() * .8});
+  }
+  const near = Math.max(0, 1 - Math.abs(x - me.x) / 900);
+  if (near > 0){
+    shake = Math.max(shake, 20 * near);
+    if (near > .55) slow = .09;
+    ifl = Math.max(ifl, .2 * near);
+    rainWind = f * 2.2 * near;
+    boom(near);
+    if (near > .5 && navigator.vibrate){ try { navigator.vibrate(45); } catch(e){} }
+  }
+}
+
+/* ---------- 네트워크 (Supabase Realtime) ---------- */
+let channel = null, online = false;
+const configured = !SUPABASE_URL.includes("YOUR_PROJECT");
+if (configured){
+  const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {realtime:{params:{eventsPerSecond:30}}});
+  channel = sb.channel('rain-arena', {config:{broadcast:{self:false}}});
+  channel.on('broadcast', {event:'s'}, ({payload:p}) => {
+    let o = others[p.i];
+    if (!o){ o = others[p.i] = mk(p.x); o.ty = p.y; o.y = p.y; }
+    o.tx = p.x; o.ty = p.y; o.f = p.f; o.hp = p.h; o.w = p.w || 0; o.moving = p.m; o.seen = performance.now();
+    if (p.pu && !o.pu && o.pt < 0){ o.pt = 0; } o.pu = p.pu;
+  });
+  channel.on('broadcast', {event:'hit'}, ({payload:p}) => {
+    if (p.to !== myId || me.hp <= 0) return;
+    const kb = p.kb || 260, dmg = p.dmg || 0;
+    me.hp = Math.max(0, me.hp - dmg);
+    me.vx = p.dir * kb; me.vy = -200 - (kb > 500 ? 200 : 0);
+    if (dmg > 0) me.flash = 0.2;
+    me.stun = kb > 500 ? .4 : .15;
+    if (kb > 500){ me.pt = -1; shake = Math.max(shake, 24); }
+    if (me.hp <= 0){ deadT = 1.8; }
+    sendState(true);
+  });
+  channel.on('broadcast', {event:'b'}, ({payload:p}) => {
+    let o = others[p.i]; if (!o) o = others[p.i] = mk(p.x);
+    o.w = p.k; o.f = p.f; o.rc = .12; spawnShot(p.x, p.y, p.f, p.k, false);
+  });
+  channel.on('broadcast', {event:'fx'}, ({payload:p}) => { impactFx(p.x, p.f, !!p.g); });
+  channel.on('broadcast', {event:'bye'}, ({payload:p}) => { delete others[p.i]; });
+  channel.subscribe(s => { online = (s === 'SUBSCRIBED'); if (online) sendState(true); });
+  addEventListener('beforeunload', () => channel.send({type:'broadcast', event:'bye', payload:{i:myId}}));
+}
+// 상태가 바뀌었거나 400ms 지났을 때만 전송 (대기 중 메시지 수 절약)
+let lastSig = '', lastSendT = 0;
+function sendState(force){
+  if (!online) return;
+  const p = {i:myId, x:+me.x.toFixed(1), y:+me.y.toFixed(1), f:me.f, h:me.hp, w:me.w, m:me.moving, pu:me.pt >= 0};
+  const sig = p.x + ',' + p.y + ',' + p.f + ',' + p.h + ',' + p.w + ',' + p.m + ',' + p.pu, now = performance.now();
+  if (!force && sig === lastSig && now - lastSendT < 400) return;
+  lastSig = sig; lastSendT = now;
+  channel.send({type:'broadcast', event:'s', payload:p});
+}
+setInterval(() => sendState(false), 66);
+
+/* ---------- 업데이트 ---------- */
+function update(dt){
+  // 내 캐릭터
+  const g0 = gy(me.x);
+  if (me.hp > 0){
+    const stunned = me.stun > 0;
+    me.stun = Math.max(0, me.stun - dt);
+    const dir = stunned ? 0 : (keys.R ? 1 : 0) - (keys.L ? 1 : 0);
+    if (stunned) me.vx *= Math.max(0, 1 - dt * 5);
+    else if (dir){ me.f = dir; me.vx += (dir * SPEED - me.vx) * Math.min(1, dt * 12); }
+    else me.vx *= Math.max(0, 1 - dt * 10);
+    if (wantJump && !stunned && me.y >= g0 - 0.5){ me.vy = -JUMP; }
+  } else {
+    me.vx *= Math.max(0, 1 - dt * 6);
+    deadT -= dt;
+    if (deadT <= 0){ me.hp = 100; me.x = 300 + Math.random() * (WORLD - 600); me.y = 0; me.vx = me.vy = 0; me.pt = -1; me.stun = 0; me.ammo = WEAPONS.map(w => w.max || 0); }
+  }
+  me.vy += GRAV * dt; me.x += me.vx * dt; me.y += me.vy * dt;
+  me.x = Math.max(20, Math.min(WORLD - 20, me.x));
+  const g1 = gy(me.x);
+  if (me.y > g1){ me.y = g1; me.vy = 0; }
+  me.moving = me.y >= g1 - 1 && Math.abs(me.vx) > 20;
+  if (me.moving) me.walk += dt * 11;
+  me.flash = Math.max(0, me.flash - dt);
+
+  // 무기: 공격 입력, 근접 판정, 총알
+  me.cd = Math.max(0, me.cd - dt); me.rc = Math.max(0, me.rc - dt);
+  if (keys.A) attack();
+  WEAPONS.forEach((g, i) => { if (g.t === 'g' && me.ammo[i] < g.max){ regen[i] = (regen[i] || 0) + dt; if (regen[i] > g.rg){ regen[i] = 0; me.ammo[i]++; } } });
+  const cw = WEAPONS[me.w];
+  if (me.pt >= 0){
+    me.pt += dt;
+    if (!me.hitDone && me.pt > cw.dur * (cw.w2 - .05)){
+      me.hitDone = true;
+      for (const id in others){
+        const o = others[id]; if (o.hp <= 0) continue;
+        const dx = (o.x - me.x) * me.f, dy = Math.abs(o.y - me.y);
+        if (dx > -5 && dx < cw.reach && dy < 60){
+          if (online) channel.send({type:'broadcast', event:'hit', payload:{to:id, dir:me.f, dmg:cw.dmg, kb:cw.kb}});
+          o.flash = 0.15;
+        } else if (cw.big && online && dx > -5 && dx < 210 && dy < 90){
+          // 풍압: 직격 범위 밖이라도 앞쪽 일정 거리는 밀려남 (데미지 없음)
+          channel.send({type:'broadcast', event:'hit', payload:{to:id, dir:me.f, dmg:0, kb:420}});
+        }
+      }
+      if (cw.big){
+        const ix = me.x + me.f * 58, gnd = me.y > gy(ix) - 50;
+        impactFx(ix, me.f, gnd);
+        if (online) channel.send({type:'broadcast', event:'fx', payload:{x:+ix.toFixed(1), f:me.f, g:gnd ? 1 : 0}});
+      }
+    }
+    if (me.pt >= cw.dur) me.pt = -1;
+  }
+  for (let i = bullets.length - 1; i >= 0; i--){
+    const b = bullets[i], px = b.x; b.x += b.vx * dt; b.y += b.vy * dt; b.life -= dt;
+    let dead = b.life <= 0 || b.y > gy(b.x);
+    if (b.own && !dead && online){
+      const lo = Math.min(px, b.x) - 14, hi = Math.max(px, b.x) + 14;
+      for (const id in others){
+        const o = others[id];
+        if (o.hp > 0 && o.x > lo && o.x < hi && b.y > o.y - 90 && b.y < o.y){
+          channel.send({type:'broadcast', event:'hit', payload:{to:id, dir:b.f, dmg:b.dmg, kb:b.kb}});
+          o.flash = 0.12; dead = true; break;
+        }
+      }
+    }
+    if (dead) bullets.splice(i, 1);
+  }
+  for (let i = muz.length - 1; i >= 0; i--){ muz[i].t -= dt; if (muz[i].t <= 0) muz.splice(i, 1); }
+
+  // 크레이터: 빠르게 파이고, 일정 시간 뒤 서서히 복구
+  for (let i = craters.length - 1; i >= 0; i--){
+    const c = craters[i]; c.age += dt;
+    let k = Math.min(1, c.age / .1); k = 1 - (1 - k) * (1 - k);
+    const rec = c.life - 8;
+    if (c.age > rec) k *= Math.max(0, 1 - (c.age - rec) / 8);
+    c.k = k;
+    if (c.age > c.life) craters.splice(i, 1);
+  }
+  // 파편
+  for (let i = debris.length - 1; i >= 0; i--){
+    const d = debris[i]; d.t += dt;
+    d.vy += GRAV * dt; d.x += d.vx * dt; d.y += d.vy * dt; d.rot += d.vr * dt;
+    const g = gy(d.x);
+    if (d.y > g){ d.y = g; d.vy = -d.vy * .35; d.vx *= .6; d.vr *= .6; if (Math.abs(d.vy) < 40){ d.vy = 0; d.vr = 0; d.vx = 0; } }
+    if (d.t > d.life) debris.splice(i, 1);
+  }
+  // 먼지
+  for (let i = dust.length - 1; i >= 0; i--){
+    const d = dust[i]; d.t += dt;
+    d.x += d.vx * dt; d.y += d.vy * dt; d.vx *= Math.max(0, 1 - dt * 2.2); d.vy *= Math.max(0, 1 - dt * 2); d.r += 40 * dt;
+    if (d.t > d.max) dust.splice(i, 1);
+  }
+  // 바람줄기, 충격파 링
+  for (let i = streaks.length - 1; i >= 0; i--){ const s = streaks[i]; s.t += dt; s.x += s.vx * dt; if (s.t > .3) streaks.splice(i, 1); }
+  for (let i = rings.length - 1; i >= 0; i--){ rings[i].t += dt; if (rings[i].t > .45) rings.splice(i, 1); }
+
+  // 다른 플레이어 보간
+  const now = performance.now();
+  for (const id in others){
+    const o = others[id];
+    if (now - o.seen > 4000){ delete others[id]; continue; }
+    const px = o.x;
+    o.x += (o.tx - o.x) * Math.min(1, dt * 14); o.y += (o.ty - o.y) * Math.min(1, dt * 14);
+    if (o.moving || Math.abs(o.x - px) > 0.3) o.walk += dt * 11;
+    o.rc = Math.max(0, o.rc - dt); if (o.pt >= 0){ o.pt += dt; if (o.pt >= WEAPONS[o.w].dur) o.pt = -1; }
+    o.flash = Math.max(0, o.flash - dt);
+  }
+}
+
+/* ---------- 그리기 ---------- */
+const lerp = (a, b, t) => a + (b - a) * t;
+function limb(x, y, a1, l1, a2, l2, f){
+  const jx = x + Math.sin(a1) * l1 * f, jy = y + Math.cos(a1) * l1;
+  const ex = jx + Math.sin(a2) * l2 * f, ey = jy + Math.cos(a2) * l2;
+  ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(jx, jy); ctx.lineTo(ex, ey); ctx.stroke();
+  return [ex, ey];
+}
+function person(p, label){
+  const air = p.y < gy(p.x) - 2, mv = p.moving ? 1 : 0, f = p.f;
+  const x = p.x, hipY = p.y - 36, shY = p.y - 64;
+  ctx.save();
+  if (p.hp <= 0){ ctx.translate(x, p.y); ctx.rotate(-Math.PI / 2 * f); ctx.translate(-x, -p.y); ctx.globalAlpha = .7; }
+  ctx.strokeStyle = ctx.fillStyle = p.flash > 0 ? '#ffffff' : '#000';
+  ctx.lineWidth = 6; ctx.lineCap = ctx.lineJoin = 'round';
+  // 다리 (관절: 무릎)
+  for (let i = 0; i < 2; i++){
+    const ph = p.walk + i * Math.PI;
+    let th = air ? (i ? 0.6 : -0.3) : Math.sin(ph) * 0.8 * mv;
+    let kn = air ? 0.7 : Math.max(0, Math.cos(ph)) * 1.0 * mv;
+    limb(x, hipY, th, 18, th - kn, 18, f);
+  }
+  // 몸통 + 머리
+  ctx.beginPath(); ctx.moveTo(x, hipY); ctx.lineTo(x, shY); ctx.stroke();
+  ctx.beginPath(); ctx.arc(x, shY - 11, 9, 0, 7); ctx.fill();
+  const wp = WEAPONS[p.w] || WEAPONS[0], gun = wp.t === 'g';
+  // 뒤쪽 팔 (관절: 팔꿈치) - 일자로 펴되 몸통과 겹치지 않게 살짝 벌림
+  const a = air ? -0.75 : -0.14 + Math.sin(p.walk + Math.PI) * 0.7 * mv;
+  limb(x, shY + 2, a, 15, a + 0.5 * mv, 15, f);
+  // 앞쪽 팔
+  let fa, fe, t = -1;
+  if (p.pt >= 0 && !gun){
+    t = p.pt / wp.dur; const w1 = wp.w1, w2 = wp.w2;
+    if (t < w1){ const s = t / w1; fa = lerp(.14, -.6, s); fe = fa + lerp(0, 1.6, s); }
+    else if (t < w2){ const s = (t - w1) / (w2 - w1); fa = lerp(-.6, 1.55, s); fe = fa + lerp(1.6, 0, s); }
+    else { const s = (t - w2) / (1 - w2); fa = lerp(1.55, .14, s); fe = fa; }
+  } else if (gun){ fa = fe = 1.5 - 0.3 * (p.rc || 0) / .12; }
+  else if (air){ fa = .85; fe = fa; }
+  else { fa = .14 + Math.sin(p.walk) * 0.7 * mv; fe = fa + 0.5 * mv; }
+  const [fx, fy] = limb(x, shY + 2, fa, 15, fe, 15, f);
+  ctx.beginPath(); ctx.arc(fx, fy, 4.5, 0, 7); ctx.fill();
+  if (gun){ ctx.lineWidth = 5; ctx.beginPath(); ctx.moveTo(fx, fy); ctx.lineTo(fx + f * wp.len, fy - 1); ctx.stroke(); }
+  if (wp.bat){
+    let ba = 2.6;
+    if (t >= 0) ba = t < wp.w1 ? lerp(2.6, 3.7, t / wp.w1) : t < wp.w2 ? lerp(3.7, 1.4, (t - wp.w1) / (wp.w2 - wp.w1)) : lerp(1.4, 2.6, (t - wp.w2) / (1 - wp.w2));
+    ctx.lineWidth = 6; ctx.beginPath(); ctx.moveTo(fx, fy); ctx.lineTo(fx + Math.sin(ba) * 34 * f, fy + Math.cos(ba) * 34); ctx.stroke();
+  }
+  if (wp.dmg >= 35 && t >= 0 && t < wp.w2){
+    ctx.fillStyle = 'rgba(255,240,200,' + (0.25 + t * .6) + ')'; ctx.beginPath(); ctx.arc(fx, fy, 4 + t * 14, 0, 7); ctx.fill();
+  }
+  ctx.restore();
+  // 체력바
+  if (p.hp > 0){
+    ctx.fillStyle = 'rgba(0,0,0,.45)'; ctx.fillRect(x - 18, p.y - 100, 36, 4);
+    ctx.fillStyle = '#b33'; ctx.fillRect(x - 18, p.y - 100, 36 * p.hp / 100, 4);
+    if (label){ ctx.fillStyle = '#8a9099'; ctx.font = '10px system-ui'; ctx.textAlign = 'center'; ctx.fillText(label, x, p.y - 106); }
+  }
+}
+
+// 비 (진심펀치 풍압에 휩쓸림)
+const drops = Array.from({length: 230}, () => ({x:Math.random(), y:Math.random(), l:10 + Math.random() * 16, s:0.9 + Math.random() * 0.8}));
+function rain(dt){
+  rainWind *= Math.exp(-dt * 2.5);
+  if (Math.abs(rainWind) < .01) rainWind = 0;
+  const slant = 0.15 - rainWind * 0.35;
+  ctx.strokeStyle = 'rgba(170,182,200,.32)'; ctx.lineWidth = 1.2; ctx.lineCap = 'butt';
+  ctx.beginPath();
+  for (const d of drops){
+    d.y += dt * d.s * 1.1; d.x += dt * d.s * (rainWind - 0.12);
+    if (d.y > 1){ d.y = -0.05; d.x = Math.random() * 1.2; }
+    if (d.x < -0.1) d.x = 1.1;
+    if (d.x > 1.2) d.x = -0.1;
+    const sx = d.x * W, sy = d.y * H;
+    ctx.moveTo(sx, sy); ctx.lineTo(sx - d.l * slant, sy + d.l);
+  }
+  ctx.stroke();
+}
+
+/* ---------- 번개 & 천둥 ---------- */
+let ac = null;
+function initAudio(){
+  if (!ac){ try { ac = new (window.AudioContext || window.webkitAudioContext)(); } catch(e){} }
+  if (ac && ac.state === 'suspended') ac.resume();
+}
+['pointerdown','keydown'].forEach(e => addEventListener(e, initAudio));
+function thunder(){
+  if (!ac) return;
+  const len = ac.sampleRate * 3, buf = ac.createBuffer(1, len, ac.sampleRate), d = buf.getChannelData(0);
+  for (let i = 0; i < len; i++){ const k = i / len; d[i] = (Math.random() * 2 - 1) * Math.pow(1 - k, 2.2) * (1 + Math.sin(k * 40) * .3); }
+  const src = ac.createBufferSource(); src.buffer = buf;
+  const lp = ac.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 160;
+  const g = ac.createGain(); g.gain.value = 1.6;
+  src.connect(lp); lp.connect(g); g.connect(ac.destination); src.start();
+}
+// 진심펀치 충격음: 저음 쿵 + 파편 노이즈
+function boom(v){
+  if (!ac || v <= 0) return;
+  const t = ac.currentTime;
+  const o = ac.createOscillator(), g = ac.createGain();
+  o.type = 'sine'; o.frequency.setValueAtTime(150, t); o.frequency.exponentialRampToValueAtTime(35, t + .35);
+  g.gain.setValueAtTime(.9 * v, t); g.gain.exponentialRampToValueAtTime(.001, t + .45);
+  o.connect(g); g.connect(ac.destination); o.start(t); o.stop(t + .5);
+  const len = Math.floor(ac.sampleRate * .25), buf = ac.createBuffer(1, len, ac.sampleRate), d = buf.getChannelData(0);
+  for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 3);
+  const s = ac.createBufferSource(); s.buffer = buf;
+  const lp = ac.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 900;
+  const g2 = ac.createGain(); g2.gain.value = .5 * v;
+  s.connect(lp); lp.connect(g2); g2.connect(ac.destination); s.start(t);
+}
+let clock = 0, nextBolt = 3, flash = 0, flick = 0, bolt = null, boltT = 0, thunderAt = 0;
+function lightningTick(dt){
+  clock += dt;
+  if (clock > nextBolt){
+    flash = 1; flick = clock + 0.1 + Math.random() * 0.1; boltT = 0.3;
+    const bx = Math.random() * W; bolt = [[bx, 0]];
+    let x = bx, y = 0;
+    while (y < H * 0.68){ y += 20 + Math.random() * 40; x += (Math.random() - .5) * 60; bolt.push([x, y]); }
+    nextBolt = clock + 6 + Math.random() * 10;
+    thunderAt = clock + 0.3 + Math.random() * 1.6;
+  }
+  if (flick && clock > flick){ flash = 0.8; flick = 0; boltT = 0.2; }
+  if (thunderAt && clock > thunderAt){ thunderAt = 0; thunder(); }
+  flash = Math.max(0, flash - dt * 2.8); boltT = Math.max(0, boltT - dt);
+}
+
+const splashes = []; let splashAcc = 0;
+let last = performance.now(), camX = me.x;
+function frame(t){
+  const rdt = Math.min(0.05, (t - last) / 1000); last = t;
+  const dt = slow > 0 ? rdt * 0.25 : rdt;   // 히트스톱
+  slow = Math.max(0, slow - rdt);
+  update(dt); lightningTick(dt);
+
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  const gr = ctx.createLinearGradient(0, 0, 0, H);
+  gr.addColorStop(0, '#121417'); gr.addColorStop(0.68, '#44474c'); gr.addColorStop(1, '#101113');
+  ctx.fillStyle = gr; ctx.fillRect(0, 0, W, H);
+  if (flash > 0){ ctx.fillStyle = 'rgba(215,225,245,' + (flash * 0.6) + ')'; ctx.fillRect(0, 0, W, H); }
+  if (boltT > 0 && bolt){
+    ctx.save(); ctx.strokeStyle = 'rgba(240,245,255,' + Math.min(1, boltT * 4) + ')'; ctx.lineWidth = 3;
+    ctx.shadowColor = '#cfe0ff'; ctx.shadowBlur = 18; ctx.beginPath();
+    bolt.forEach((p, i) => i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1])); ctx.stroke(); ctx.restore();
+  }
+  // 카메라: 내 캐릭터 따라가기 + 화면 흔들림
+  const viewW = W / scale;
+  const target = Math.max(0, Math.min(WORLD - viewW, me.x - viewW / 2));
+  camX += (target - camX) * Math.min(1, rdt * 8);
+  shake *= Math.exp(-rdt * 7); if (shake < .3) shake = 0;
+  const shx = (Math.random() - .5) * 2 * shake, shy = (Math.random() - .5) * 2 * shake;
+  const groundScreen = H * 0.68;
+  ctx.setTransform(DPR * scale, 0, 0, DPR * scale, (-camX * scale + shx) * DPR, (groundScreen + shy) * DPR);
+
+  // 바닥 (검정, 크레이터 반영)
+  const gx0 = camX - 60, gx1 = camX + viewW + 60;
+  ctx.fillStyle = '#000'; ctx.beginPath(); ctx.moveTo(gx0, 3000);
+  for (let x = gx0; x <= gx1; x += 6) ctx.lineTo(x, gy(x));
+  ctx.lineTo(gx1, gy(gx1)); ctx.lineTo(gx1, 3000); ctx.closePath(); ctx.fill();
+  // 크레이터: 고인 물, 윤곽선, 균열
+  for (const c of craters){
+    if (c.x + c.r * 1.5 < gx0 || c.x - c.r * 1.5 > gx1) continue;
+    const k = c.k; if (k < .02) continue;
+    const lvl = c.d * k * .5;
+    ctx.fillStyle = 'rgba(150,170,200,' + (.22 * k) + ')';
+    for (let x = c.x - c.r; x < c.x + c.r; x += 4){ const y = gy(x); if (y > lvl) ctx.fillRect(x, lvl, 4.5, y - lvl); }
+    ctx.strokeStyle = 'rgba(125,132,145,' + (.45 * k) + ')'; ctx.lineWidth = 1.2; ctx.lineCap = 'round'; ctx.beginPath();
+    let first = true;
+    for (let x = c.x - c.r * 1.45; x <= c.x + c.r * 1.45; x += 4){ const y = gy(x); if (first){ ctx.moveTo(x, y); first = false; } else ctx.lineTo(x, y); }
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(100,106,118,' + (.55 * k) + ')'; ctx.beginPath();
+    for (const cr of c.cracks){
+      let x = c.x + cr.x, y = gy(x) + 1; ctx.moveTo(x, y);
+      for (const q of cr.p){ x += q[0]; y += q[1]; ctx.lineTo(x, y); }
+    }
+    ctx.stroke();
+  }
+  // 바닥에 튕기는 빗물
+  splashAcc += dt * 60; let sn = Math.floor(splashAcc); splashAcc -= sn;
+  while (sn-- > 0 && splashes.length < 160) splashes.push({x:camX + Math.random() * viewW, t:0, s:.6 + Math.random() * .8});
+  ctx.lineWidth = 1;
+  for (let i = splashes.length - 1; i >= 0; i--){
+    const sp = splashes[i]; sp.t += dt; const k = sp.t / .32;
+    if (k >= 1){ splashes.splice(i, 1); continue; }
+    const sy0 = gy(sp.x);
+    ctx.strokeStyle = 'rgba(190,205,225,' + (0.55 * (1 - k)) + ')';
+    ctx.beginPath(); ctx.ellipse(sp.x, sy0, (2 + k * 9) * sp.s, (1 + k * 2.5) * sp.s, 0, 0, 7); ctx.stroke();
+    const h = Math.sin(k * Math.PI) * 9 * sp.s;
+    ctx.fillStyle = 'rgba(200,215,235,' + (0.6 * (1 - k)) + ')';
+    ctx.fillRect(sp.x - k * 8 * sp.s, sy0 - h - 1, 1.5, 1.5); ctx.fillRect(sp.x + k * 8 * sp.s, sy0 - h * .8 - 1, 1.5, 1.5);
+  }
+  // 캐릭터
+  for (const id in others) person(others[id], id.slice(0, 3));
+  person(me, '나');
+  ctx.lineCap = 'round'; ctx.lineWidth = 2; ctx.strokeStyle = 'rgba(255,235,170,.95)';
+  for (const b of bullets){ ctx.beginPath(); ctx.moveTo(b.x, b.y); ctx.lineTo(b.x - b.vx * .016, b.y - b.vy * .016); ctx.stroke(); }
+  for (const m of muz){ ctx.fillStyle = 'rgba(255,230,150,' + (m.t / .08) + ')'; ctx.beginPath(); ctx.arc(m.x, m.y, 2 + 7 * m.t / .08, 0, 7); ctx.fill(); }
+
+  // 진심펀치 이펙트: 먼지, 파편, 바람줄기, 충격파
+  for (const d of dust){
+    ctx.fillStyle = 'rgba(105,110,120,' + (.35 * (1 - d.t / d.max)) + ')';
+    ctx.beginPath(); ctx.arc(d.x, d.y, d.r, 0, 7); ctx.fill();
+  }
+  ctx.lineWidth = 1; ctx.strokeStyle = 'rgba(150,156,168,.5)'; ctx.fillStyle = '#08090a';
+  for (const d of debris){
+    ctx.globalAlpha = Math.min(1, (d.life - d.t) / .4);
+    ctx.save(); ctx.translate(d.x, d.y); ctx.rotate(d.rot);
+    ctx.beginPath(); ctx.moveTo(-d.s, -d.s * .5); ctx.lineTo(d.s * .8, -d.s * .7); ctx.lineTo(d.s * .4, d.s * .6); ctx.lineTo(-d.s * .7, d.s * .4); ctx.closePath();
+    ctx.fill(); ctx.stroke(); ctx.restore();
+  }
+  ctx.globalAlpha = 1;
+  ctx.lineWidth = 1.5; ctx.lineCap = 'round';
+  for (const s of streaks){
+    const f = s.vx > 0 ? 1 : -1;
+    ctx.strokeStyle = 'rgba(225,233,248,' + (.6 * (1 - s.t / .3)) + ')';
+    ctx.beginPath(); ctx.moveTo(s.x, s.y); ctx.lineTo(s.x - f * s.len, s.y); ctx.stroke();
+  }
+  for (const r of rings){
+    const k = r.t / .45, rr = 10 + k * 170, a = 1 - k;
+    ctx.save(); ctx.translate(r.x, r.y); ctx.scale(r.f, 1);
+    ctx.strokeStyle = 'rgba(235,242,255,' + (.8 * a) + ')'; ctx.lineWidth = 1 + 3 * a;
+    ctx.beginPath(); ctx.ellipse(0, 0, rr * .55, rr, 0, -1.2, 1.2); ctx.stroke();
+    ctx.strokeStyle = 'rgba(235,242,255,' + (.4 * a) + ')'; ctx.lineWidth = 1 + 1.5 * a;
+    ctx.beginPath(); ctx.ellipse(-rr * .2, 0, rr * .4, rr * .75, 0, -1.2, 1.2); ctx.stroke();
+    ctx.restore();
+    ctx.strokeStyle = 'rgba(200,210,225,' + (.45 * a) + ')'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.ellipse(r.x, gy(r.x), rr * 1.3, rr * .16, 0, 0, 7); ctx.stroke();
+  }
+
+  // 비 (화면 좌표)
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  rain(rdt);
+  const vg = ctx.createRadialGradient(W / 2, H * 0.55, Math.min(W, H) * 0.25, W / 2, H * 0.55, Math.max(W, H) * 0.75);
+  vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(0,0,0,.7)');
+  ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H);
+  if (ifl > .01){ ctx.fillStyle = 'rgba(255,255,255,' + ifl + ')'; ctx.fillRect(0, 0, W, H); }
+  ifl = Math.max(0, ifl - rdt * 2);
+
+  hpEl.style.width = me.hp + '%';
+  { const wp = WEAPONS[me.w]; wlEl.textContent = wp.ic + ' ' + wp.n + (wp.t === 'g' ? '  ' + me.ammo[me.w] + '/' + wp.max : ''); }
+  msgEl.innerHTML = !configured ? 'Supabase 키 미설정<br>(오프라인)' : online ? '접속 ● ' + (Object.keys(others).length + 1) + '명' : '연결 중…';
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

@@ -190,7 +190,7 @@ function sever(p, k, dir){
   gibs.push({x:j.x, y:j.y, vx:dir * (140 + Math.random() * 260), vy:-(240 + Math.random() * 300), rot:0, vr:dir * (3 + Math.random() * 9), pts:j.pts, hd:k === 'hd', t:0, rest:false, bd:0});
   const nk = k === 'hd' ? p._j.nk : j;
   bleed(nk.x, nk.y, dir, 1, false);
-  texts.push({x:nk.x, y:nk.y - 24, v:'SEVER!', t:0, sz:20, c:'#ff5a4a'});
+  texts.push({x:nk.x, y:nk.y - 24, v:'치명타!', t:0, sz:20, c:'#ff5a4a'});
   const vol = Math.max(0, 1 - Math.abs(nk.x - me.x) / 900);
   shake = Math.max(shake, 10 * vol); sndSever(vol);
   if (p === me){ me.dr = 0; if (k === 'fa'){ me.pt = -1; me.sw = false; me.g = false; } }

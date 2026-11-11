@@ -96,8 +96,8 @@ const WORLD = 3000, GRAV = 1500, SPEED = 190, JUMP = 560, PARRY = .16;
    SVK:     산데비스탄 사용자의 시간 배율 (다른 사람이 느려진 만큼 + 조금 더 빠름)
    서로 켜면 둘 다 SVK 로 같은 속도 → 동등하게 움직임
    SV_DRAIN / SV_DRAIN_AD: 초당 에너지 소모량 (아담 스매셔 변신 중엔 훨씬 적게 닳아서 오래 쓸 수 있음) */
-const SV_SLOW = .3, SVK = 1.25, SV_DRAIN = 17, SV_DRAIN_AD = 5;
-const ADAM_HP = 400, ADAM_T = 25;   // 아담 스매셔: 변신 체력 / 지속시간(초)
+const SV_SLOW = .1, SVK = 2.00, SV_DRAIN = 17, SV_DRAIN_AD = 5;
+const ADAM_HP = 400, ADAM_T = 10000;   // 아담 스매셔: 변신 체력 / 지속시간(초)
 const BOW_MIN = .05;   // 활 조준각 최저(거의 수평) / 최고는 1.25 (약 72°)
 let wsc = 1, svAny = false;                       // wsc: 현재 월드 시간 배율 (부드럽게 변함)
 const tsOf = p => p.sv ? SVK : wsc;               // 해당 플레이어의 시간 배율
@@ -147,7 +147,7 @@ const WEAPONS = [
 ];
 const TKW = WEAPONS.findIndex(w => w.tkn), ADW = WEAPONS.findIndex(w => w.n === '스매셔 미니건'), ADR = WEAPONS.findIndex(w => w.n === '스매셔 미사일');
 /* ---------- 전차 ---------- */
-const TANK_HP = 300;
+const TANK_HP = 500;
 const TS = 2;   // 전차 크기 배율
 const isProne = p => p.lg >= 2 || p.ps === 2;
 const bodyH = p => p.ad ? 130 : p.tk >= 0 ? 100 : isProne(p) ? 30 : p.ps === 1 ? 58 : 90;   // 맞는 높이

@@ -115,12 +115,12 @@ const WEAPONS = [
 const TKW = WEAPONS.length - 1;
 /* ---------- 전차 ---------- */
 const TANK_HP = 300;
-const tanks = [600, 1500, 2400].map(hx => ({hx, x:hx, f:1, hp:TANK_HP, drv:null, dead:0, rc:0, dn:''}));
+const TS = 2;   // 전차 크기 배율
 const isProne = p => p.lg >= 2 || p.ps === 2;
-const bodyH = p => p.tk >= 0 ? 50 : isProne(p) ? 30 : p.ps === 1 ? 58 : 90;   // 맞는 높이
-const bodyW = p => p.tk >= 0 ? 46 : isProne(p) ? 26 : 0;                       // 옆으로 넓은 몸
+const bodyH = p => p.tk >= 0 ? 100 : isProne(p) ? 30 : p.ps === 1 ? 58 : 90;   // 맞는 높이
+const bodyW = p => p.tk >= 0 ? 88 : isProne(p) ? 26 : 0;                       // 옆으로 넓은 몸
 me.ammo = WEAPONS.map(w => w.max || 0); me.cd = 0;
-me.kc1 = 0; me.kc2 = 0; me.inv = 0; me.dash = 0; me.km = 0; me.dx0 = 0; me.thp = 0;
+me.kc1 = 0; me.kc2 = 0; me.inv = 0; me.dash = 0; me.km = 0; me.dx0 = 0; me.thp = 0; me.tkcd = 0;
 const bullets = [], muz = [], regen = [];
 
 /* ---------- 이펙트 상태 ---------- */
@@ -174,6 +174,7 @@ addEventListener('keydown', e => {
   if (['j','J','k','K'].includes(e.key)) keys.A = true;
   if (isG(e.key)) keys.S = true;
   if (e.key >= '1' && e.key <= '9') selW(+e.key - 1);
+  if (e.key === '0') toggleTank();
   if (e.key === 'e' || e.key === 'E') useWave();
   if (e.key === 'q' || e.key === 'Q') useDash();
   if (e.key === 'r' || e.key === 'R') startReload();
@@ -196,71 +197,47 @@ function setPose(p){
   if (me.ps === 2){ me.g = false; me.pt = -1; me.sw = false; me.km = 0; }
   sendState(true);
 }
-/* ---------- 전차 탑승 / 하차 ---------- */
-function toggleTank(){
-  if (!started || me.hp <= 0) return;
-  if (me.tk >= 0){
-    tanks[me.tk].x = me.x; tanks[me.tk].hp = me.thp;
-    me.tk = -1; me.vy = -260; me.cd = .3; click(1, 0); sendState(true); return;
-  }
-  let bi = -1, bd = 110;
-  for (let i = 0; i < tanks.length; i++){
-    const t = tanks[i]; if (t.dead > 0 || t.drv) continue;
-    const d = Math.abs(t.x - me.x); if (d < bd){ bd = d; bi = i; }
-  }
-  if (bi < 0) return;
-  const t = tanks[bi];
-  me.tk = bi; me.thp = t.hp; me.x = t.x; me.f = t.f; me.vx = 0; me.ps = 0;
-  me.pt = -1; me.sw = false; me.rlOn = false; me.g = false; me.dash = 0; me.km = 0; me.cd = .3;
-  click(1, 2); sendState(true);
+/* ---------- 전차: 인벤토리에서 고르면 그 자리에 소환되어 탑승 / 하차하면 사라짐 ---------- */
+function dismount(cd){
+  me.tk = -1; me.vy = -260; me.cd = .3; me.tkcd = cd; click(1, 0); sendState(true);
 }
+function mountTank(){
+  if (!started || me.hp <= 0 || me.tk >= 0 || me.tkcd > 0) return;
+  me.tk = 0; me.thp = TANK_HP; me.vx = 0; me.ps = 0;
+  me.pt = -1; me.sw = false; me.rlOn = false; me.g = false; me.dash = 0; me.km = 0; me.cd = .3;
+  impactFx(me.x, me.f, false, .5); click(1, 2);
+  if (online) channel.send({type:'broadcast', event:'fx', payload:{x:+me.x.toFixed(1), f:me.f, g:0, s:.5}});
+  sendState(true);
+}
+function toggleTank(){ if (me.tk >= 0) dismount(8); else mountTank(); }
 // 전차가 맞았을 때: 폭발은 풀 데미지, 근접/화살은 약하게, 기관단총은 아주 약하게
 function tankHit(p){
   const k = p.bz ? 1 : p.sm ? .12 : .35;
   const d = Math.max(1, Math.round((p.dmg || 0) * k));
   me.thp = Math.max(0, me.thp - d);
   me.vx += p.dir * Math.min(120, (p.kb || 0) * .15);
-  hitFx(me.x, me.y, 1, .5, d, p.dir, 0, 0, 40);
-  if (online) channel.send({type:'broadcast', event:'ht', payload:{x:+me.x.toFixed(1), y:+me.y.toFixed(1), t:1, d, pw:.5, f:p.dir, a:p.a, v:myId, m:p.m ? 1 : 0, ch:40, sm:p.sm ? 1 : 0}});
+  hitFx(me.x, me.y, 1, .5, d, p.dir, 0, 0, 80);
+  if (online) channel.send({type:'broadcast', event:'ht', payload:{x:+me.x.toFixed(1), y:+me.y.toFixed(1), t:1, d, pw:.5, f:p.dir, a:p.a, v:myId, m:p.m ? 1 : 0, ch:80, sm:p.sm ? 1 : 0}});
   if (me.thp <= 0) wreck(p.dir);
   sendState(true);
 }
-// 전차 파괴: 폭발하며 운전자가 튕겨 나옴, 25초 뒤 원래 자리에 다시 생김
+// 전차 파괴: 폭발하며 운전자가 튕겨 나옴 (20초간 다시 소환 불가)
 function wreck(dir){
-  const i = me.tk, x = me.x, y = me.y;
-  tanks[i].dead = 25; tanks[i].hp = TANK_HP; tanks[i].drv = null;
-  me.tk = -1; me.vy = -420; me.vx = dir * 260; me.hp = Math.max(1, me.hp - 40); me.stun = .5; me.flash = .15;
-  detonate(x, y - 24);
-  if (online) channel.send({type:'broadcast', event:'td', payload:{t:i}});
+  const x = me.x, y = me.y;
+  me.tk = -1; me.tkcd = 20; me.vy = -420; me.vx = dir * 260; me.hp = Math.max(1, me.hp - 40); me.stun = .5; me.flash = .15;
+  detonate(x, y - 48);
 }
-function tankTick(dt){
-  for (let i = 0; i < tanks.length; i++){
-    const t = tanks[i];
-    if (t.dead > 0){
-      t.dead -= dt; t.drv = null;
-      if (t.dead <= 0){ t.x = t.hx; t.f = 1; t.hp = TANK_HP; }
-      continue;
-    }
-    // 같은 전차를 동시에 탔다면 id가 작은 쪽이 우선
-    if (me.tk === i) for (const id in others) if (others[id].tk === i && id < myId){ me.tk = -1; break; }
-    let drv = null;
-    if (me.tk === i) drv = 'me';
-    else for (const id in others) if (others[id].tk === i && others[id].hp > 0){ drv = id; break; }
-    t.drv = drv;
-    if (drv === 'me'){ t.x = me.x; t.f = me.f; t.hp = me.thp; t.rc = me.rc; t.dn = '🟢 ' + me.n; }
-    else if (drv){ const o = others[drv]; t.x = o.x; t.f = o.f; if (o.th > 0) t.hp = o.th; t.rc = o.rc; t.dn = o.n || ''; }
-    else { t.rc = 0; t.dn = ''; }
-    if (t.hp < TANK_HP * .4 && Math.random() < dt * 14)
-      dust.push({x:t.x + (Math.random() - .5) * 30, y:gy(t.x) - 40, vx:(Math.random() - .5) * 20, vy:-40, r:5, t:0, max:.9});
-  }
+function tankSmoke(p, hp, dt){
+  if (p.tk >= 0 && hp < TANK_HP * .4 && Math.random() < dt * 14)
+    dust.push({x:p.x + (Math.random() - .5) * 60, y:p.y - 80, vx:(Math.random() - .5) * 20, vy:-40, r:7, t:0, max:.9});
 }
 function attack(){
   if (me.hp <= 0 || me.cd > 0 || me.pt >= 0 || me.stun > 0 || me.g || me.rlOn) return;
   if (me.tk >= 0){
     me.cd = WEAPONS[TKW].cd; me.rc = .2;
-    spawnShot(me.x, me.y, me.f, TKW, true, 34, myId);
+    spawnShot(me.x, me.y, me.f, TKW, true, 68, myId);
     sndBazooka(1); shake = Math.max(shake, 9); me.vx -= me.f * 70;
-    if (online) channel.send({type:'broadcast', event:'b', payload:{i:myId, x:me.x, y:me.y, f:me.f, k:TKW, sh:34}});
+    if (online) channel.send({type:'broadcast', event:'b', payload:{i:myId, x:me.x, y:me.y, f:me.f, k:TKW, sh:68}});
     return;
   }
   const wp = WEAPONS[me.w];
@@ -278,7 +255,7 @@ function attack(){
 function spawnShot(x, y, f, k, own, sh, sid){
   const wp = WEAPONS[k]; if (!wp || wp.t !== 'r') return;
   sh = sh || 58;
-  const vy = wp.smg ? (Math.random() - .5) * 70 : wp.rk ? -15 : -45, ox = wp.tkn ? 74 : (wp.rk || wp.smg) ? 36 : 30;
+  const vy = wp.smg ? (Math.random() - .5) * 70 : wp.rk ? -15 : -45, ox = wp.tkn ? 148 : (wp.rk || wp.smg) ? 36 : 30;
   bullets.push({x:x + f * ox, y:y - sh, vx:wp.spd * f, vy, life:wp.life, own, dmg:wp.dmg, kb:wp.kb, st:wp.st, gm:wp.gm, f, g:wp.g, sx:x, k, smg:!!wp.smg, rk:!!wp.rk, sid});
   muz.push({x:x + f * (ox + 4), y:y - sh, t:.08});
 }
@@ -328,21 +305,27 @@ function click(v, n){
   if (!ac || v <= 0) return;
   tn(n === 2 ? 900 : 480, 260, .06, .28 * v, 'square'); nz(.04, 2400, 'highpass', .28 * v, 2);
 }
+function tankSlot(){
+  const st = me.tk >= 0 ? 'HP ' + Math.round(me.thp) + '/' + TANK_HP : me.tkcd > 0 ? '재소환 ' + Math.ceil(me.tkcd) + '초' : '';
+  return '<div class="slot' + (me.tk >= 0 ? ' sel' : '') + '" data-i="tank"><div class="si">🚙</div><div class="sn">전차</div>' +
+    '<div class="pr">+ 큰 몸집 · 두꺼운 장갑 · 전차포</div><div class="co">− 느림 · 큰 표적 · 점프 불가</div>' + (st ? '<div class="sa">' + st + '</div>' : '') + '</div>';
+}
 function renderInv(){
   invp.innerHTML = '<div class="grid">' + WEAPONS.map((w, i) => w.hid ? '' :
     '<div class="slot' + (i === me.w ? ' sel' : '') + '" data-i="' + i + '"><div class="si">' + w.ic + '</div><div class="sn">' + w.n + '</div>' +
     '<div class="pr">+ ' + w.pro + '</div><div class="co">− ' + w.con + '</div>' +
-    (w.t === 'r' ? '<div class="sa">' + me.ammo[i] + '/' + w.max + '</div>' : '') + '</div>').join('') + '</div>';
+    (w.t === 'r' ? '<div class="sa">' + me.ammo[i] + '/' + w.max + '</div>' : '') + '</div>').join('') + tankSlot() + '</div>';
 }
 function toggleInv(){ const on = invp.style.display !== 'flex'; invp.style.display = on ? 'flex' : 'none'; if (on) renderInv(); }
 function selW(i){
-  if (!WEAPONS[i] || WEAPONS[i].hid || me.tk >= 0) return;
+  if (!WEAPONS[i] || WEAPONS[i].hid) return;
+  if (me.tk >= 0) dismount(8);
   me.w = i; me.pt = -1; me.sw = false; me.rlOn = false; me.km = 0;
   bpEl.textContent = WEAPONS[i].ic; brlEl.style.display = WEAPONS[i].rl ? 'flex' : 'none';
   bk1El.style.display = bk2El.style.display = WEAPONS[i].kt ? 'flex' : 'none';
   invp.style.display = 'none'; sendState(true);
 }
-invp.addEventListener('click', e => { const sl = e.target.closest('.slot'); if (sl) selW(+sl.dataset.i); else toggleInv(); });
+invp.addEventListener('click', e => { const sl = e.target.closest('.slot'); if (sl){ if (sl.dataset.i === 'tank'){ invp.style.display = 'none'; toggleTank(); } else selW(+sl.dataset.i); } else toggleInv(); });
 document.getElementById('inv').addEventListener('pointerdown', e => { e.preventDefault(); toggleInv(); });
 bpEl.textContent = WEAPONS[me.w].ic;
 // 상태에 따라 버튼 표시/숨김 (자리는 grid에 고정돼 있어서 서로 겹치거나 밀리지 않음)
@@ -351,9 +334,7 @@ function updateBtns(){
   const show = (el, on) => { const v = on ? 'flex' : 'none'; if (el.style.display !== v) el.style.display = v; };
   show(bjEl, !tk); show(bsEl, !tk); show(bcrEl, !tk); show(bprEl, !tk);
   show(brlEl, !tk && !!w0.rl); show(bk1El, !tk && !!w0.kt); show(bk2El, !tk && !!w0.kt);
-  let near = false;
-  if (!tk && me.hp > 0) for (const t of tanks) if (!t.drv && t.dead <= 0 && Math.abs(t.x - me.x) < 110) near = true;
-  show(btEl, tk || near);
+  show(btEl, tk);
   const tx = tk ? '하차' : '탑승'; if (btEl.textContent !== tx) btEl.textContent = tx;
   const ic = tk ? '💥' : w0.ic; if (bpEl.textContent !== ic) bpEl.textContent = ic;
   bcrEl.classList.toggle('act', me.ps === 1); bprEl.classList.toggle('act', me.ps === 2);
@@ -384,15 +365,15 @@ function impactFx(x, f, ground, s){
   for (let i = 0; i < ns; i++) streaks.push({x:x + f * Math.random() * 18, y:gh - 8 - Math.random() * 100 * s, vx:f * (700 + Math.random() * 600) * s, len:(30 + Math.random() * 60) * s, t:0});
   for (let i = 0; i < Math.ceil(12 * s); i++) dust.push({x:x + (Math.random() - .5) * 40, y:gh - 4, vx:f * (80 + Math.random() * 280) * s + (Math.random() - .5) * 60, vy:-Math.random() * 70, r:(5 + Math.random() * 6) * s, t:0, max:.5 + Math.random() * .5});
   if (ground){
-    const r = (68 + Math.random() * 16) * s, cracks = [];
-    for (let i = 0; i < 9; i++){
+    const r = (120 + Math.random() * 30) * s, cracks = [];
+    for (let i = 0; i < 14; i++){
       const side = i % 2 ? 1 : -1, pts = [], n = 3 + Math.floor(Math.random() * 3);
       for (let j = 0; j < n; j++) pts.push([side * (Math.random() * 18 - 3), 5 + Math.random() * 10]);
       cracks.push({x:side * r * (.3 + Math.random() * 1.1), p:pts});
     }
-    if (craters.length >= 30) craters.shift();
-    craters.push({x, r, d:(24 + Math.random() * 6) * s, age:0, life:26, k:0, cracks});
-    for (let i = 0; i < Math.ceil(20 * s); i++) debris.push({x:x + (Math.random() - .5) * 50, y:gh - 2, vx:(Math.random() - .5) * 320 + f * 160, vy:-(260 + Math.random() * 520) * s, s:2.5 + Math.random() * 5, rot:Math.random() * 6, vr:(Math.random() - .5) * 14, t:0, life:1.4 + Math.random() * .8});
+    if (craters.length >= 60) craters.shift();
+    craters.push({x, r, d:(46 + Math.random() * 10) * s, age:0, life:26, k:0, cracks});
+    for (let i = 0; i < Math.ceil(40 * s); i++) debris.push({x:x + (Math.random() - .5) * 50, y:gh - 2, vx:(Math.random() - .5) * 320 + f * 160, vy:-(260 + Math.random() * 520) * s, s:2.5 + Math.random() * 5, rot:Math.random() * 6, vr:(Math.random() - .5) * 14, t:0, life:1.4 + Math.random() * .8});
   }
   const near = Math.max(0, 1 - Math.abs(x - me.x) / 900);
   if (near > 0){
@@ -424,7 +405,7 @@ function detonate(x, y){
   channel.send({type:'broadcast', event:'ex', payload:{x:+x.toFixed(1), y:+y.toFixed(1), i:myId}});
   for (const id in others){
     const o = others[id]; if (o.hp <= 0) continue;
-    const d = Math.hypot(o.x - x, o.y - (o.tk >= 0 ? 24 : isProne(o) ? 18 : o.ps === 1 ? 30 : 40) - y);
+    const d = Math.hypot(o.x - x, o.y - (o.tk >= 0 ? 48 : isProne(o) ? 18 : o.ps === 1 ? 30 : 40) - y);
     if (d > 165) continue;
     channel.send({type:'broadcast', event:'hit', payload:{to:id, dir:o.x >= x ? 1 : -1, dmg:Math.round(Math.max(30, 80 * (1 - d / 175))), kb:520, st:.55, gm:3, m:0, a:myId, ar:0, bz:d < 85 ? 2 : 1, lc:.8}});
   }
@@ -551,9 +532,10 @@ function takeHit(p){
   let dmg = p.dmg || 0, kb = p.kb || 200, st = p.st || .1, type = 0;
   const bz = p.bz || 0, ch = isProne(me) ? 24 : me.ps === 1 ? 40 : 56;
   const pw = Math.min(1, dmg / 26 * .6 + kb / 700 * .4);
-  const front = !bz && me.g && me.f === -p.dir;      // 폭발은 방패로 못 막음
+  const pwin = bz ? PARRY * 1.7 : PARRY;
+  const front = me.g && me.f === -p.dir && (!bz || (me.gt < pwin && me.pOk));      // 폭발은 일반 방패로는 못 막고, 패링 타이밍에만 막을 수 있음
   if (front){
-    if (me.gt < PARRY && me.pOk){
+    if (me.gt < pwin && me.pOk){
       type = 2; dmg = 0; kb = 0; st = 0; me.gg = Math.min(100, me.gg + 20); me.bf = .2; me.bt = 2;
     } else {
       me.gg -= dmg * (p.gm || 1) * 1.5;
@@ -566,7 +548,7 @@ function takeHit(p){
   }
   me.hp = Math.max(0, me.hp - dmg);
   // 바주카: 직격(또는 폭발로 사망)하면 몸이 산산조각
-  if (bz && (bz === 2 || me.hp <= 0)){
+  if (type !== 2 && bz && (bz === 2 || me.hp <= 0)){
     me.hp = 0; me.gib = true; deadT = 2.6; me.g = false; me.pt = -1; me.rlOn = false; me.vx = me.vy = 0;
     gibBurst(me.x, me.y, p.dir, me.lg);
     slow = Math.max(slow, .12);
@@ -659,9 +641,6 @@ function connect(){
     for (let i = bullets.length - 1; i >= 0; i--) if (bullets[i].rk && !bullets[i].own && bullets[i].sid === p.i) bullets.splice(i, 1);
   });
   channel.on('broadcast', {event:'fx'}, ({payload:p}) => { impactFx(p.x, p.f, !!p.g, p.s || 1); });
-  channel.on('broadcast', {event:'td'}, ({payload:p}) => {
-    const t = tanks[p.t]; if (t){ t.dead = 25; t.hp = TANK_HP; t.drv = null; }
-  });
   channel.on('broadcast', {event:'bye'}, ({payload:p}) => { delete others[p.i]; });
   channel.subscribe(s => { online = (s === 'SUBSCRIBED'); if (online) sendState(true); });
   addEventListener('beforeunload', () => channel.send({type:'broadcast', event:'bye', payload:{i:myId}}));
@@ -683,7 +662,7 @@ function doMelee(cw){
   for (const id in others){
     const o = others[id]; if (o.hp <= 0) continue;
     const dx = (o.x - me.x) * me.f, dy = Math.abs(o.y - me.y);
-    if (dx > -8 && dx < cw.reach + (o.tk >= 0 ? 40 : 0) && dy < 64){
+    if (dx > -8 && dx < cw.reach + (o.tk >= 0 ? 90 : 0) && dy < 64){
       let dmg = cw.dmg;
       if (cw.sp) dmg *= dx > 86 ? 1.4 : dx < 44 ? .6 : 1;   // 창은 끝부분이 가장 강함
       if (online) channel.send({type:'broadcast', event:'hit', payload:{to:id, dir:me.f, dmg:Math.max(1, Math.round(dmg)), kb:cw.kb, st:cw.st, gm:cw.gm, m:1, a:myId, lc:cw.lc || 0}});
@@ -887,7 +866,9 @@ function update(dt){
     o.flash = Math.max(0, o.flash - dt); o.bf = Math.max(0, o.bf - dt);
     tickArrows(o, dt); tickStumps(o, dt);
   }
-  tankTick(dt);
+  me.tkcd = Math.max(0, me.tkcd - dt);
+  tankSmoke(me, me.thp, dt);
+  for (const id in others) tankSmoke(others[id], others[id].th, dt);
 }
 
 /* ---------- 그리기 ---------- */
@@ -1127,14 +1108,14 @@ function rrect(x, y, w, h, r){
   ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
   ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
 }
-function drawTank(t){
-  const x = t.x, f = t.f, y = gy(x), rc = t.rc || 0, edge = 'rgba(150,158,172,.8)';
-  ctx.save(); ctx.translate(x, y); ctx.scale(f, 1);
-  ctx.lineJoin = 'round'; ctx.lineCap = 'round'; ctx.lineWidth = 1.5; ctx.strokeStyle = edge; ctx.fillStyle = '#0a0a0b';
+function drawTank(p, hp, label){
+  const x = p.x, f = p.f, y = p.y, rc = p.rc || 0, edge = 'rgba(150,158,172,.85)', S = TS;
+  ctx.save(); ctx.translate(x, y); ctx.scale(f * S, S);
+  ctx.lineJoin = 'round'; ctx.lineCap = 'round'; ctx.lineWidth = 1.3; ctx.strokeStyle = edge; ctx.fillStyle = '#0a0a0b';
   // 궤도 + 바퀴 + 굴러가는 마디
   rrect(-44, -15, 88, 15, 7); ctx.fill(); ctx.stroke();
   for (let k = 0; k < 5; k++){ ctx.beginPath(); ctx.arc(-32 + k * 16, -7.5, 4.5, 0, 7); ctx.stroke(); }
-  const m = ((-x * f) % 9 + 9) % 9;
+  const m = ((-x * f / S) % 9 + 9) % 9;
   ctx.beginPath();
   for (let k = 0; k < 10; k++){ const lx = -40 + m + k * 9; if (lx < 40){ ctx.moveTo(lx, -15); ctx.lineTo(lx, -12); ctx.moveTo(lx, 0); ctx.lineTo(lx, -3); } }
   ctx.stroke();
@@ -1143,17 +1124,15 @@ function drawTank(t){
   // 포신 (발사하면 뒤로 밀림)
   const rb = rc > 0 ? 9 * rc / .2 : 0;
   rrect(14 - rb, -37.5, 56, 7, 2); ctx.fill(); ctx.stroke();
-  // 포탑
+  // 포탑 + 해치 밖으로 보이는 운전자 머리
   rrect(-18, -42, 36, 16, 6); ctx.fill(); ctx.stroke();
-  if (t.drv){ ctx.beginPath(); ctx.arc(-4, -47, 5.5, 0, 7); ctx.fill(); ctx.stroke(); }
+  ctx.beginPath(); ctx.arc(-4, -47, 5.5, 0, 7); ctx.fill(); ctx.stroke();
   if (rc > .13){ ctx.fillStyle = 'rgba(255,225,150,' + (rc / .2) + ')'; ctx.beginPath(); ctx.arc(74, -34, 5 + 8 * rc / .2, 0, 7); ctx.fill(); }
   ctx.restore();
-  // 체력바 + 운전자 이름
-  if (t.drv || t.hp < TANK_HP){
-    ctx.fillStyle = 'rgba(0,0,0,.5)'; ctx.fillRect(x - 24, y - 62, 48, 5);
-    ctx.fillStyle = t.hp < TANK_HP * .35 ? '#d04a2a' : '#c8892a'; ctx.fillRect(x - 24, y - 62, 48 * Math.max(0, t.hp) / TANK_HP, 5);
-  }
-  if (t.drv && t.dn){ ctx.fillStyle = '#9aa0a8'; ctx.font = '11px system-ui'; ctx.textAlign = 'center'; ctx.fillText(t.dn, x, y - 68); }
+  // 체력바 + 닉네임
+  ctx.fillStyle = 'rgba(0,0,0,.5)'; ctx.fillRect(x - 32, y - 120, 64, 6);
+  ctx.fillStyle = hp < TANK_HP * .35 ? '#d04a2a' : '#c8892a'; ctx.fillRect(x - 32, y - 120, 64 * Math.max(0, hp) / TANK_HP, 6);
+  if (label){ ctx.fillStyle = '#9aa0a8'; ctx.font = '11px system-ui'; ctx.textAlign = 'center'; ctx.fillText(label, x, y - 127); }
 }
 
 // 비 (망치 풍압에 휩쓸림)
@@ -1371,14 +1350,12 @@ function frame(t){
     ctx.fillStyle = 'rgba(110,12,12,' + (Math.min(1, (s.life - s.t) / 4) * .85) + ')';
     ctx.beginPath(); ctx.ellipse(s.x, gy(s.x) + .5, s.w, s.w * .22, 0, 0, 7); ctx.fill();
   }
-  // 전차 (캐릭터보다 뒤에 그림)
-  for (const tk of tanks) if (tk.dead <= 0 && tk.x + 90 > gx0 && tk.x - 90 < gx1) drawTank(tk);
   // 발도술 잔상
   for (const g of ghosts){ ctx.globalAlpha = .45 * (1 - g.t / .3); person(g.p, '', 1); }
   ctx.globalAlpha = 1;
   // 캐릭터 (분쇄된 캐릭터/전차 탑승 중인 캐릭터는 그리지 않음 / 내 닉네임 앞에는 🟢 온라인 표시)
-  for (const id in others){ const o = others[id]; if (!o.gib && !(o.tk >= 0)) person(o, o.n || id.slice(0, 3)); }
-  if (!me.gib && me.tk < 0) person(me, '🟢 ' + me.n);
+  for (const id in others){ const o = others[id]; if (!o.gib){ if (o.tk >= 0) drawTank(o, o.th, o.n || id.slice(0, 3)); else person(o, o.n || id.slice(0, 3)); } }
+  if (!me.gib){ if (me.tk >= 0) drawTank(me, me.thp, '🟢 ' + me.n); else person(me, '🟢 ' + me.n); }
   // 화살 / 총알 / 로켓
   ctx.lineCap = 'round';
   for (const b of bullets){

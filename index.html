@@ -56,6 +56,15 @@
 </style>
 </head>
 <body>
+<script>
+window.addEventListener('error', function(e){
+  var d = document.getElementById('errbox');
+  if (!d){ d = document.createElement('div'); d.id = 'errbox';
+    d.style.cssText = 'position:fixed;left:8px;right:8px;bottom:8px;z-index:99;background:rgba(120,0,0,.92);color:#fff;font:12px/1.4 monospace;padding:8px;border-radius:8px;white-space:pre-wrap;max-height:40vh;overflow:auto;user-select:text;-webkit-user-select:text;touch-action:auto';
+    document.body.appendChild(d); }
+  d.textContent += '오류: ' + (e.message || 'unknown') + (e.lineno ? ' (줄 ' + e.lineno + ')' : '') + '\n';
+});
+</script>
 <canvas id="c"></canvas>
 <div id="hud"><div><div id="hpbox"><div id="hp"></div></div><div id="ggbox"><div id="gg"></div></div><div id="svbox"><div id="sv"></div></div><div id="wl"></div></div><div id="msg"></div></div>
 <div id="padL"><div class="btn" id="bl">◀</div><div class="btn" id="br">▶</div></div>
@@ -67,7 +76,7 @@
 </div>
 <div id="inv">🎒</div><div id="invp"></div>
 <div id="emo">😀</div><div id="emop"></div>
-<div id="nick"><div class="box"><div class="t">Rain Arena</div><div class="s">닉네임을 정하고 입장하세요</div><input id="ni" maxlength="8" placeholder="닉네임 (최대 8자)" autocomplete="off"><button id="go">입장</button></div></div>
+<div id="nick"><div class="box"><div class="t">Rain Arena</div><div class="s">닉네임을 정하고 입장하세요</div><input id="ni" maxlength="8" placeholder="닉네임 (최대 8자)" autocomplete="off"><button id="go" type="button">입장</button></div></div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <script>
@@ -567,8 +576,8 @@ function startGame(){
   try { localStorage.setItem('ra_nick', n); } catch(e){}
   nickEl.style.display = 'none';
   started = true;
-  initAudio();
-  connect();
+  try { initAudio(); } catch(e){}
+  try { connect(); } catch(e){ console.error(e); }
 }
 document.getElementById('go').addEventListener('click', startGame);
 niEl.addEventListener('keydown', e => { if (e.key === 'Enter') startGame(); });
@@ -1764,4 +1773,122 @@ function frame(t){
   // 이펙트: 먼지, 파편, 바람줄기, 충격파
   for (const d of dust){
     ctx.fillStyle = 'rgba(105,110,120,' + (.35 * (1 - d.t / d.max)) + ')';
-    ctx.beginPath(); ctx.arc(d.x, d.y, d.r, 0, 7); ctx.fill(
+    ctx.beginPath(); ctx.arc(d.x, d.y, d.r, 0, 7); ctx.fill();
+  }
+  ctx.lineWidth = 1; ctx.strokeStyle = 'rgba(150,156,168,.5)'; ctx.fillStyle = '#08090a';
+  for (const d of debris){
+    ctx.globalAlpha = Math.min(1, (d.life - d.t) / .4);
+    ctx.save(); ctx.translate(d.x, d.y); ctx.rotate(d.rot);
+    ctx.beginPath(); ctx.moveTo(-d.s, -d.s * .5); ctx.lineTo(d.s * .8, -d.s * .7); ctx.lineTo(d.s * .4, d.s * .6); ctx.lineTo(-d.s * .7, d.s * .4); ctx.closePath();
+    ctx.fill(); ctx.stroke(); ctx.restore();
+  }
+  // 분쇄된 신체 조각
+  for (const g of gibs){
+    ctx.globalAlpha = Math.min(1, (g.life - g.age) / 1.5);
+    ctx.save(); ctx.translate(g.x, g.y); ctx.rotate(g.rot);
+    if (g.t === 'h'){
+      ctx.fillStyle = '#000'; ctx.beginPath(); ctx.arc(0, 0, 9, 0, 7); ctx.fill();
+      ctx.fillStyle = 'rgba(160,18,18,.85)'; ctx.beginPath(); ctx.arc(5, 2, 4.5, 0, 7); ctx.fill();
+    } else if (g.t === 'l'){
+      ctx.strokeStyle = '#000'; ctx.lineWidth = 6; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(-g.l / 2, 0); ctx.lineTo(g.l / 2, 0); ctx.stroke();
+      ctx.fillStyle = '#a01818'; ctx.beginPath(); ctx.arc(g.l / 2, 0, 3.3, 0, 7); ctx.fill();
+    } else { ctx.fillStyle = g.c; ctx.beginPath(); ctx.arc(0, 0, g.r, 0, 7); ctx.fill(); }
+    ctx.restore();
+  }
+  ctx.globalAlpha = 1;
+  ctx.lineWidth = 1.5; ctx.lineCap = 'round';
+  for (const s of streaks){
+    const f = s.vx > 0 ? 1 : -1;
+    ctx.strokeStyle = 'rgba(225,233,248,' + (.6 * (1 - s.t / .3)) + ')';
+    ctx.beginPath(); ctx.moveTo(s.x, s.y); ctx.lineTo(s.x - f * s.len, s.y); ctx.stroke();
+  }
+  for (const r of rings){
+    const k = r.t / .45, rr = (10 + k * 170) * (r.s || 1), a = 1 - k;
+    ctx.save(); ctx.translate(r.x, r.y); ctx.scale(r.f, 1);
+    ctx.strokeStyle = 'rgba(235,242,255,' + (.8 * a) + ')'; ctx.lineWidth = 1 + 3 * a;
+    ctx.beginPath(); ctx.ellipse(0, 0, rr * .55, rr, 0, -1.2, 1.2); ctx.stroke();
+    ctx.strokeStyle = 'rgba(235,242,255,' + (.4 * a) + ')'; ctx.lineWidth = 1 + 1.5 * a;
+    ctx.beginPath(); ctx.ellipse(-rr * .2, 0, rr * .4, rr * .75, 0, -1.2, 1.2); ctx.stroke();
+    ctx.restore();
+    ctx.strokeStyle = 'rgba(200,210,225,' + (.45 * a) + ')'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.ellipse(r.x, gy(r.x), rr * 1.3, rr * .16, 0, 0, 7); ctx.stroke();
+  }
+  // 폭발 불덩이
+  for (const e of fires){
+    const k = e.t / .5, r = e.r * (.4 + .7 * Math.sqrt(k)), a = 1 - k;
+    const fg = ctx.createRadialGradient(e.x, e.y, 0, e.x, e.y, r);
+    fg.addColorStop(0, 'rgba(255,250,210,' + a + ')'); fg.addColorStop(.35, 'rgba(255,170,50,' + (a * .9) + ')');
+    fg.addColorStop(.7, 'rgba(200,60,20,' + (a * .5) + ')'); fg.addColorStop(1, 'rgba(60,20,10,0)');
+    ctx.fillStyle = fg; ctx.beginPath(); ctx.arc(e.x, e.y, r, 0, 7); ctx.fill();
+  }
+  // 타격 번쩍임 + 스파크 + 데미지 숫자
+  for (const b of bursts){
+    const k = b.t / .14, a = 1 - k;
+    ctx.strokeStyle = 'rgba(' + b.c + ',' + a + ')'; ctx.lineWidth = 2.2 * a + .6; ctx.lineCap = 'round'; ctx.beginPath();
+    for (let i = 0; i < 8; i++){
+      const an = i * Math.PI / 4 + b.r, r0 = b.r * .35 * (1 + k), r1 = b.r * (.6 + k * .9);
+      ctx.moveTo(b.x + Math.cos(an) * r0, b.y + Math.sin(an) * r0); ctx.lineTo(b.x + Math.cos(an) * r1, b.y + Math.sin(an) * r1);
+    }
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(255,255,255,' + (a * .8) + ')'; ctx.beginPath(); ctx.arc(b.x, b.y, b.r * .5 * (1 - k * .4), 0, 7); ctx.fill();
+  }
+  for (const m of mists){
+    ctx.fillStyle = 'rgba(150,15,15,' + (.35 * (1 - m.t / m.max)) + ')';
+    ctx.beginPath(); ctx.arc(m.x, m.y, m.r, 0, 7); ctx.fill();
+  }
+  for (const b of blood){
+    ctx.fillStyle = 'rgba(175,22,22,' + Math.min(1, (b.life - b.t) / .3) + ')';
+    ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, 7); ctx.fill();
+  }
+  for (const s of sparks){
+    ctx.strokeStyle = 'rgba(' + s.c + ',' + Math.max(0, 1 - s.t / s.life) + ')'; ctx.lineWidth = s.w; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(s.x, s.y); ctx.lineTo(s.x - s.vx * .03, s.y - s.vy * .03); ctx.stroke();
+  }
+  ctx.textAlign = 'center'; ctx.lineJoin = 'round';
+  for (const tx of texts){
+    const a = Math.min(1, (.75 - tx.t) / .25), pop = tx.t < .08 ? 1 + (1 - tx.t / .08) * .5 : 1;
+    ctx.globalAlpha = a; ctx.font = 'bold ' + Math.round(tx.sz * pop) + 'px system-ui';
+    ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(0,0,0,.85)'; ctx.strokeText(tx.v, tx.x, tx.y);
+    ctx.fillStyle = tx.c; ctx.fillText(tx.v, tx.x, tx.y);
+  }
+  ctx.globalAlpha = 1;
+
+  // 비 (화면 좌표) - 산데비스탄 중엔 느리게 내림
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  rain(rdt * wsc);
+  const vg = ctx.createRadialGradient(W / 2, H * 0.55, Math.min(W, H) * 0.25, W / 2, H * 0.55, Math.max(W, H) * 0.75);
+  vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(0,0,0,.7)');
+  ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H);
+  // 산데비스탄 화면 연출: 시간이 느려질수록 푸른 톤 + 가장자리 색 번짐 (내가 켜면 붉은색, 남이 켜면 청색)
+  const sk = Math.max(0, Math.min(1, (1 - wsc) / (1 - SV_SLOW)));
+  if (sk > .01){
+    ctx.fillStyle = 'rgba(10,40,70,' + (.2 * sk) + ')'; ctx.fillRect(0, 0, W, H);
+    const ec = me.sv ? '255,30,90' : '30,200,255';
+    const sg = ctx.createRadialGradient(W / 2, H * 0.55, Math.min(W, H) * 0.2, W / 2, H * 0.55, Math.max(W, H) * 0.7);
+    sg.addColorStop(0, 'rgba(' + ec + ',0)'); sg.addColorStop(1, 'rgba(' + ec + ',' + (.38 * sk) + ')');
+    ctx.fillStyle = sg; ctx.fillRect(0, 0, W, H);
+    if (me.sv){   // 속도선
+      ctx.strokeStyle = 'rgba(255,255,255,.16)'; ctx.lineWidth = 1; ctx.beginPath();
+      for (let i = 0; i < 10; i++){ const yy = Math.random() * H, xx = Math.random() * W, ll = 60 + Math.random() * 160; ctx.moveTo(xx, yy); ctx.lineTo(xx - me.f * ll, yy); }
+      ctx.stroke();
+    }
+  }
+  if (ifl > .01){ ctx.fillStyle = 'rgba(255,255,255,' + ifl + ')'; ctx.fillRect(0, 0, W, H); }
+  ifl = Math.max(0, ifl - rdt * 2);
+
+  updateBtns();
+  bk1El.style.opacity = me.kc1 > 0 ? .35 : 1; bk2El.style.opacity = me.kc2 > 0 ? .35 : 1;
+  hpEl.style.width = (me.ad ? me.ahp / ADAM_HP * 100 : me.tk >= 0 ? me.thp / TANK_HP * 100 : me.hp) + '%'; hpEl.style.background = me.ad ? '#e03030' : me.tk >= 0 ? '#c8892a' : '#a33';
+  ggEl.style.width = me.gg + '%'; ggEl.style.background = me.glock ? '#b7793a' : '#5a8fc7';
+  svEl.style.width = me.svE + '%'; svEl.style.background = me.sv ? '#ff2a6d' : me.svLock ? '#b7793a' : '#05d9e8';
+  { const wp = WEAPONS[me.w]; wlEl.textContent = wp.ic + ' ' + wp.n + (wp.t === 'r' ? '  ' + (me.rlOn ? '장전 중…' : me.ammo[me.w] + '/' + wp.max) : '') + (me.bc > 0 ? ' · 각도 ' + Math.round(me.aim * 57.3) + '°' : '') + (me.lg >= 2 ? ' · 기어가는 중' : me.lg ? ' · 다리 부상' : '') + (me.ps === 2 ? ' · 엎드림' : me.ps === 1 ? ' · 앉음' : '');
+    if (me.ad) wlEl.textContent = '🦾 아담 스매셔 ' + Math.round(me.ahp) + '/' + ADAM_HP + ' · ' + Math.ceil(me.adT) + '초';
+    else if (me.tk >= 0) wlEl.textContent = '🚙 전차 ' + Math.round(me.thp) + '/' + TANK_HP + (me.cd > 0 ? ' · 장전 중…' : ''); }
+  msgEl.textContent = !started ? '' : (!configured ? '🔴 오프라인\n(Supabase 키 미설정)' : online ? '🟢 ' + (Object.keys(others).length + 1) + '명 접속' : '🟠 연결 중…') + (svAny ? (me.sv ? '\n⏱ 산데비스탄 작동 중' : '\n⏱ 시간 지연 중') : '');
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

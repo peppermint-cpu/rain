@@ -14,12 +14,16 @@
   #hp{height:100%;width:100%;background:#a33;transition:width .15s}
   #ggbox{width:140px;height:6px;margin-top:4px;background:rgba(0,0,0,.6);border-radius:3px;overflow:hidden}
   #gg{height:100%;width:100%;background:#5a8fc7}
+  #svbox{width:140px;height:6px;margin-top:4px;background:rgba(0,0,0,.6);border-radius:3px;overflow:hidden}
+  #sv{height:100%;width:100%;background:#05d9e8}
   #msg{text-align:right;line-height:1.4;white-space:pre-line}
   /* 조작 버튼: 좌/우 두 묶음을 flex/grid로 배치해서 세로·가로 화면 어디서도 겹치지 않음 */
   .btn{width:var(--b);height:var(--b);border-radius:50%;background:rgba(0,0,0,.55);border:2px solid rgba(255,255,255,.25);color:#fff;font-size:calc(var(--b) * .42);display:flex;align-items:center;justify-content:center;line-height:1}
   .btn.on{background:rgba(255,255,255,.35)}
   .btn.act{background:rgba(90,143,199,.6);border-color:#bfe0ff}
   #padL{position:fixed;left:calc(var(--sl) + 14px);bottom:calc(var(--sb) + 18px);display:flex;gap:var(--gp);z-index:4}
+  #bsv{position:fixed;left:calc(var(--sl) + 14px);bottom:calc(var(--sb) + 18px + var(--b) + var(--gp));z-index:4;font-size:calc(var(--b) * .3);font-weight:800;letter-spacing:1px;border-color:rgba(255,42,109,.7);color:#ff6f9c}
+  #bsv.act{background:rgba(255,42,109,.6);border-color:#ff9ab9;color:#fff}
   #padR{position:fixed;right:calc(var(--sr) + 14px);bottom:calc(var(--sb) + 18px);display:grid;grid-template-columns:repeat(3,var(--b));grid-template-rows:repeat(3,var(--b));gap:var(--gp);z-index:4}
   #bcr{grid-area:1/1}#bpr{grid-area:1/2}#bt{grid-area:1/3}
   #bk1{grid-area:2/1}#bs{grid-area:2/2}#brl{grid-area:2/3}
@@ -47,8 +51,9 @@
 </head>
 <body>
 <canvas id="c"></canvas>
-<div id="hud"><div><div id="hpbox"><div id="hp"></div></div><div id="ggbox"><div id="gg"></div></div><div id="wl"></div></div><div id="msg"></div></div>
+<div id="hud"><div><div id="hpbox"><div id="hp"></div></div><div id="ggbox"><div id="gg"></div></div><div id="svbox"><div id="sv"></div></div><div id="wl"></div></div><div id="msg"></div></div>
 <div id="padL"><div class="btn" id="bl">◀</div><div class="btn" id="br">▶</div></div>
+<div class="btn" id="bsv">SV</div>
 <div id="padR">
 <div class="btn" id="bcr">앉기</div><div class="btn" id="bpr">엎드려</div><div class="btn" id="bt">탑승</div>
 <div class="btn" id="bk1">🌊</div><div class="btn" id="bs">🛡️</div><div class="btn" id="brl">↻</div>
@@ -67,7 +72,15 @@ const SUPABASE_ANON_KEY = "sb_publishable_n7M5OMb_BIFAeJ0jdL9KBw_foAfZxeB";
 const cv = document.getElementById('c'), ctx = cv.getContext('2d');
 const hpEl = document.getElementById('hp'), ggEl = document.getElementById('gg'), msgEl = document.getElementById('msg'), wlEl = document.getElementById('wl'), invp = document.getElementById('invp'), bpEl = document.getElementById('bp'), brlEl = document.getElementById('brl'), bk1El = document.getElementById('bk1'), bk2El = document.getElementById('bk2');
 const bjEl = document.getElementById('bj'), bsEl = document.getElementById('bs'), bcrEl = document.getElementById('bcr'), bprEl = document.getElementById('bpr'), btEl = document.getElementById('bt');
+const svEl = document.getElementById('sv'), bsvEl = document.getElementById('bsv');
 const WORLD = 3000, GRAV = 1500, SPEED = 190, JUMP = 560, PARRY = .16;
+/* ---------- 산데비스탄 (시간 지연) ----------
+   SV_SLOW: 누군가 산데비스탄을 켜면 켜지 않은 모든 것(플레이어·탄·비·이펙트)이 이 배율로 느려짐
+   SVK:     산데비스탄 사용자의 시간 배율 (다른 사람이 느려진 만큼 + 조금 더 빠름)
+   서로 켜면 둘 다 SVK 로 같은 속도 → 동등하게 움직임                                       */
+const SV_SLOW = .3, SVK = 1.25;
+let wsc = 1, svAny = false;                       // wsc: 현재 월드 시간 배율 (부드럽게 변함)
+const tsOf = p => p.sv ? SVK : wsc;               // 해당 플레이어의 시간 배율
 let W, H, DPR, scale;
 function resize(){
   DPR = Math.min(devicePixelRatio || 1, 2);
@@ -80,7 +93,8 @@ addEventListener('resize', resize); resize();
 /* ---------- 플레이어 ---------- */
 const myId = Math.random().toString(36).slice(2, 8);
 // lg: 잘린 다리 수(0~2) / gib: 분쇄됨 / rlOn,rlt: 장전 중, 경과 시간 / ps: 자세(0 서기, 1 앉기, 2 엎드리기) / tk: 탑승 중인 전차 번호(-1 없음), th: 전차 체력
-const mk = (x) => ({x, y:0, vx:0, vy:0, f:1, hp:100, walk:0, moving:false, pt:-1, w:1, rc:0, pu:false, hitDone:false, flash:0, stun:0, tx:x, ty:0, seen:performance.now(), g:false, bf:0, bt:0, sw:false, n:'', arrows:[], lg:0, gib:false, rlOn:false, rlt:0, rlPrev:false, sd:0, ps:0, tk:-1, th:0});
+// sv: 산데비스탄 사용 중 / bc: 활 차징 시간, cv: 차징 비율(0~1)
+const mk = (x) => ({x, y:0, vx:0, vy:0, f:1, hp:100, walk:0, moving:false, pt:-1, w:1, rc:0, pu:false, hitDone:false, flash:0, stun:0, tx:x, ty:0, seen:performance.now(), g:false, bf:0, bt:0, sw:false, n:'', arrows:[], lg:0, gib:false, rlOn:false, rlt:0, rlPrev:false, sd:0, ps:0, tk:-1, th:0, sv:false, bc:0, cv:0, gacc:0});
 const me = mk(WORLD/2 + (Math.random()-.5)*600);
 me.gt = 0; me.gg = 100; me.glock = false; me.pcd = 0; me.pOk = false; me.n = '플레이어';
 const others = {};
@@ -89,7 +103,7 @@ let deadT = 0, started = false;
 /* ---------- 무기 ----------
    dmg 데미지 / dur 전체 시간 / w1 휘두르기 시작 / w2 타격 시점 / reach 사거리
    kb 넉백 / st 경직 / gm 방패 파괴력 배율 / mv 이동속도 배율 / lc 다리 절단 확률
-   rl 장전 시간(있으면 탄창식, 없으면 화살처럼 자동 회복)                          */
+   rl 장전 시간(있으면 탄창식, 없으면 화살처럼 자동 회복) / chg 차징 최대 시간(활)          */
 const WEAPONS = [
   {n:'단검',ic:'🗡️',t:'m',dmg:7, dur:.26,w1:.30,w2:.50,reach:46, kb:90, st:.12,gm:.5,mv:.9,len:16,lc:.05,
    pro:'초고속 · 느린 무기 끊기',con:'짧은 사거리 · 방패에 약함'},
@@ -101,8 +115,8 @@ const WEAPONS = [
    pro:'방패 파괴 · 다리 절단',con:'느린 선딜 · 끊기기 쉬움'},
   {n:'망치',ic:'🔨',t:'m',dmg:22,dur:1.1,w1:.60,w2:.72,reach:78, kb:700,st:.5,gm:1.4,mv:.12,len:32,hm:1,lc:0,
    pro:'큰 넉백 · 긴 기절',con:'매우 느림 · 빗나가면 위험'},
-  {n:'활',  ic:'🏹',t:'r',dmg:13,cd:.8,max:8,rg:1.5,spd:900,g:220,life:1.0,kb:140,st:.1,gm:1,mv:1,len:0,lc:.45,
-   pro:'원거리 · 이동하며 사격',con:'근접 약함 · 화살 제한'},
+  {n:'활',  ic:'🏹',t:'r',dmg:13,cd:.8,max:8,rg:1.5,chg:1,spd:900,g:220,life:1.0,kb:140,st:.1,gm:1,mv:1,len:0,lc:.45,
+   pro:'원거리 · 꾹 눌러 차징(강하고 멀리)',con:'근접 약함 · 화살 제한'},
   {n:'기관단총',ic:'🔫',t:'r',smg:1,dmg:4,cd:.1,max:30,rl:1.8,spd:1150,g:30,life:.65,kb:35,st:.02,gm:.6,mv:.85,len:0,lc:.25,
    pro:'빠른 연사 · 이동 사격',con:'낮은 위력 · 장전 필요'},
   {n:'바주카',ic:'🚀',t:'r',rk:1,dmg:70,cd:1.2,max:1,rl:2.4,spd:700,g:60,life:2.2,kb:520,st:.55,gm:3,mv:.55,len:0,
@@ -121,6 +135,7 @@ const bodyH = p => p.tk >= 0 ? 100 : isProne(p) ? 30 : p.ps === 1 ? 58 : 90;   /
 const bodyW = p => p.tk >= 0 ? 88 : isProne(p) ? 26 : 0;                       // 옆으로 넓은 몸
 me.ammo = WEAPONS.map(w => w.max || 0); me.cd = 0;
 me.kc1 = 0; me.kc2 = 0; me.inv = 0; me.dash = 0; me.km = 0; me.dx0 = 0; me.thp = 0; me.tkcd = 0;
+me.svE = 100; me.svLock = false;
 const bullets = [], muz = [], regen = [];
 
 /* ---------- 이펙트 상태 ---------- */
@@ -165,6 +180,7 @@ bindBtn('bk2', () => useDash());
 bindBtn('bcr', () => setPose(1));
 bindBtn('bpr', () => setPose(2));
 bindBtn('bt', () => toggleTank());
+bindBtn('bsv', () => useSv());
 const isG = k => ['l','L','s','S','Shift'].includes(k);
 addEventListener('keydown', e => {
   if (!started || e.repeat) return;
@@ -182,6 +198,7 @@ addEventListener('keydown', e => {
   if (e.key === 'c' || e.key === 'C') setPose(1);
   if (e.key === 'z' || e.key === 'Z') setPose(2);
   if (e.key === 'f' || e.key === 'F') toggleTank();
+  if (e.key === 'x' || e.key === 'X') useSv();
 });
 addEventListener('keyup', e => {
   if (['ArrowLeft','a','A'].includes(e.key)) keys.L = false;
@@ -203,8 +220,9 @@ function dismount(cd){
 }
 function mountTank(){
   if (!started || me.hp <= 0 || me.tk >= 0 || me.tkcd > 0) return;
+  if (me.sv) svOff();
   me.tk = 0; me.thp = TANK_HP; me.vx = 0; me.ps = 0;
-  me.pt = -1; me.sw = false; me.rlOn = false; me.g = false; me.dash = 0; me.km = 0; me.cd = .3;
+  me.pt = -1; me.sw = false; me.rlOn = false; me.g = false; me.dash = 0; me.km = 0; me.cd = .3; me.bc = 0; me.cv = 0;
   impactFx(me.x, me.f, false, .5); click(1, 2);
   if (online) channel.send({type:'broadcast', event:'fx', payload:{x:+me.x.toFixed(1), f:me.f, g:0, s:.5}});
   sendState(true);
@@ -241,6 +259,7 @@ function attack(){
     return;
   }
   const wp = WEAPONS[me.w];
+  if (wp.chg) return;   // 활은 bowTick()에서 차징 → 손을 떼면 발사
   if (wp.t === 'm'){ if (me.ps === 2) return; me.km = 0; me.pt = 0; me.hitDone = false; me.sw = false; me.cd = wp.dur + .06; sendState(true); return; }
   if (me.ammo[me.w] < 1){ startReload(); return; }
   me.ammo[me.w]--; me.cd = wp.cd; me.rc = wp.rk ? .2 : wp.smg ? .05 : .12;
@@ -252,11 +271,37 @@ function attack(){
   if (online) channel.send({type:'broadcast', event:'b', payload:{i:myId, x:me.x, y:me.y, f:me.f, k:me.w, sh}});
   if (wp.rl && me.ammo[me.w] < 1) startReload();   // 탄창 비면 자동 장전
 }
-function spawnShot(x, y, f, k, own, sh, sid){
+/* ---------- 활 차징: 누르고 있으면 시위를 당기고, 떼면 발사 (차징할수록 강하고 빠르고 멀리) ---------- */
+function bowTick(dt){
+  const wp = WEAPONS[me.w];
+  if (!wp.chg || me.tk >= 0 || me.hp <= 0 || me.stun > 0 || me.g || me.rlOn || me.pt >= 0){ me.bc = 0; me.cv = 0; return; }
+  if (keys.A && started){
+    if (me.cd <= 0 && me.ammo[me.w] >= 1){
+      const was = me.bc;
+      me.bc = Math.min(wp.chg, me.bc + dt);
+      if (was < wp.chg && me.bc >= wp.chg) click(1, 2);   // 풀 차징 딸깍
+    }
+  } else if (me.bc > 0){
+    fireBow(Math.max(0, Math.min(1, me.bc / wp.chg)));
+  }
+  me.cv = me.bc / wp.chg;
+}
+function fireBow(pw){
+  me.ammo[me.w]--; me.cd = .28; me.rc = .12; me.bc = 0; me.cv = 0;
+  const sh = isProne(me) ? 14 : me.ps === 1 ? 40 : 64;
+  spawnShot(me.x, me.y, me.f, me.w, true, sh, myId, pw);
+  twang(1);
+  if (pw >= .95){ click(1, 2); shake = Math.max(shake, 2); }
+  if (online) channel.send({type:'broadcast', event:'b', payload:{i:myId, x:me.x, y:me.y, f:me.f, k:me.w, sh, pw:+pw.toFixed(2)}});
+}
+function spawnShot(x, y, f, k, own, sh, sid, pw){
   const wp = WEAPONS[k]; if (!wp || wp.t !== 'r') return;
   sh = sh || 58;
+  const P = pw == null ? 1 : pw;
+  const so = own ? me : others[sid];
   const vy = wp.smg ? (Math.random() - .5) * 70 : wp.rk ? -15 : -45, ox = wp.tkn ? 148 : (wp.rk || wp.smg) ? 36 : 30;
-  bullets.push({x:x + f * ox, y:y - sh, vx:wp.spd * f, vy, life:wp.life, own, dmg:wp.dmg, kb:wp.kb, st:wp.st, gm:wp.gm, f, g:wp.g, sx:x, k, smg:!!wp.smg, rk:!!wp.rk, sid});
+  const dm = wp.chg ? .5 + 1.5 * P : 1, sp = wp.chg ? wp.spd * (.55 + .45 * P) : wp.spd, kb = wp.chg ? wp.kb * (.6 + .4 * P) : wp.kb;
+  bullets.push({x:x + f * ox, y:y - sh, vx:sp * f, vy, life:wp.life, own, dmg:Math.round(wp.dmg * dm), kb, st:wp.st, gm:wp.gm, f, g:wp.g, sx:x, k, smg:!!wp.smg, rk:!!wp.rk, sid, pw:P, fs:!!(so && so.sv)});
   muz.push({x:x + f * (ox + 4), y:y - sh, t:.08});
 }
 /* ---------- 장전 ---------- */
@@ -291,12 +336,44 @@ function dashHit(){
       channel.send({type:'broadcast', event:'hit', payload:{to:id, dir:me.f, dmg:24, kb:420, st:.35, gm:1.5, m:1, a:myId, lc:.5}});
   }
 }
-function spawnWave(x, y, f, own, sid){ waves.push({x:x + f * 24, y:y - 52, f, vx:f * 780, t:0, life:.7, own, sid, hit:{}}); }
+function spawnWave(x, y, f, own, sid){
+  const so = own ? me : others[sid];
+  waves.push({x:x + f * 24, y:y - 52, f, vx:f * 780, t:0, life:.7, own, sid, hit:{}, fs:!!(so && so.sv)});
+}
 function katanaArc(x, y, f, big){ arcs.push({x, y, f, big, t:0}); }
 function dashFx(x, y, f){
   slashes.push({x1:x, x2:x + f * 300, y:y - 50, t:0});
   for (let i = 0; i < 14; i++) sparks.push({x:x + f * Math.random() * 300, y:y - 50 + (Math.random() - .5) * 16, vx:(Math.random() - .5) * 200, vy:-Math.random() * 200, t:0, life:.3 + Math.random() * .3, w:1.5, c:'200,235,255'});
   sndDash(Math.max(0, 1 - Math.abs(x - me.x) / 900)); ifl = Math.max(ifl, .08);
+}
+/* ---------- 산데비스탄 ----------
+   켜면: 나를 뺀 모든 것(비, 다른 플레이어, 탄, 이펙트)이 느려지고, 나는 조금 빨라지며 잔상이 남음.
+   온라인 동기화: 내 켜짐 상태(sv)를 상태 패킷으로 보내면, 받은 쪽이 "누가 켰는지"를 보고
+   자기 캐릭터의 시간 흐름을 스스로 늦춤. 여러 명이 켜면 켠 사람끼리는 같은 속도.          */
+function useSv(){
+  if (!started || me.hp <= 0 || me.tk >= 0) return;
+  if (me.sv){ svOff(); return; }
+  if (me.svLock || me.svE < 25) return;
+  me.sv = true; svFx(me.x, me.y, 1, 1); sendState(true);
+}
+function svOff(){
+  if (!me.sv) return;
+  me.sv = false; svFx(me.x, me.y, 0, 1); sendState(true);
+}
+function svFx(x, y, on, vol){
+  const c1 = on ? '255,42,109' : '5,217,232';
+  for (let i = 0; i < 26; i++){
+    const a = Math.random() * 6.3, sp = 150 + Math.random() * 500;
+    sparks.push({x, y:y - 45, vx:Math.cos(a) * sp, vy:Math.sin(a) * sp, t:0, life:.3 + Math.random() * .4, w:1.4 + Math.random() * 1.6, c:i % 2 ? c1 : '5,217,232'});
+  }
+  bursts.push({x, y:y - 45, t:0, r:48, c:c1});
+  rings.push({x, y:y - 45, f:1, t:0, s:.8}); rings.push({x, y:y - 45, f:-1, t:0, s:.8});
+  if (vol > 0){ ifl = Math.max(ifl, .25 * vol); shake = Math.max(shake, 6 * vol); sndSv(on, vol); }
+}
+let svAlt = 0;
+function pushGhost(p){
+  svAlt ^= 1;
+  ghosts.push({p:{...p, arrows:[], flash:0, g:!!p.g, gc:svAlt ? 'rgb(255,42,109)' : 'rgb(5,217,232)'}, t:0, life:.5});
 }
 function reloadSfx(wp, v){
   [[.14,0],[.78,1],[.9,2]].forEach(([k, n]) => setTimeout(() => click(v, n), wp.rl * 1000 * k));
@@ -320,7 +397,7 @@ function toggleInv(){ const on = invp.style.display !== 'flex'; invp.style.displ
 function selW(i){
   if (!WEAPONS[i] || WEAPONS[i].hid) return;
   if (me.tk >= 0) dismount(8);
-  me.w = i; me.pt = -1; me.sw = false; me.rlOn = false; me.km = 0;
+  me.w = i; me.pt = -1; me.sw = false; me.rlOn = false; me.km = 0; me.bc = 0; me.cv = 0;
   bpEl.textContent = WEAPONS[i].ic; brlEl.style.display = WEAPONS[i].rl ? 'flex' : 'none';
   bk1El.style.display = bk2El.style.display = WEAPONS[i].kt ? 'flex' : 'none';
   invp.style.display = 'none'; sendState(true);
@@ -334,10 +411,12 @@ function updateBtns(){
   const show = (el, on) => { const v = on ? 'flex' : 'none'; if (el.style.display !== v) el.style.display = v; };
   show(bjEl, !tk); show(bsEl, !tk); show(bcrEl, !tk); show(bprEl, !tk);
   show(brlEl, !tk && !!w0.rl); show(bk1El, !tk && !!w0.kt); show(bk2El, !tk && !!w0.kt);
-  show(btEl, tk);
+  show(btEl, tk); show(bsvEl, !tk);
   const tx = tk ? '하차' : '탑승'; if (btEl.textContent !== tx) btEl.textContent = tx;
   const ic = tk ? '💥' : w0.ic; if (bpEl.textContent !== ic) bpEl.textContent = ic;
   bcrEl.classList.toggle('act', me.ps === 1); bprEl.classList.toggle('act', me.ps === 2);
+  bsvEl.classList.toggle('act', me.sv);
+  bsvEl.style.opacity = (!me.sv && (me.svLock || me.svE < 25)) ? .35 : 1;
 }
 
 /* ---------- 닉네임 ---------- */
@@ -597,6 +676,10 @@ function connect(){
     o.tx = p.x; o.ty = p.y; o.f = p.f; o.hp = p.h; o.w = p.w || 0; o.moving = p.m; o.g = !!p.g; o.n = String(p.n || '').slice(0, 10); o.seen = performance.now();
     o.lg = p.lg || 0; o.gib = !!p.gb;
     o.ps = p.ps || 0; o.tk = p.tk == null ? -1 : p.tk; o.th = p.th || 0;
+    o.cv = (p.bc || 0) / 10;   // 활 차징 정도 (0~1)
+    // 산데비스탄 켜짐/꺼짐 연출 + 상태 동기화
+    if (!!p.sv !== o.sv) svFx(o.tx, o.ty, p.sv ? 1 : 0, Math.max(0, 1 - Math.abs(o.tx - me.x) / 900));
+    o.sv = !!p.sv;
     if (p.rl && !o.rlPrev){
       o.rlOn = true; o.rlt = 0;
       const rw = WEAPONS[o.w]; if (rw && rw.rl) reloadSfx(rw, Math.max(0, 1 - Math.abs(o.tx - me.x) / 900));
@@ -626,7 +709,8 @@ function connect(){
     const w = WEAPONS[p.k]; if (!w) return;
     let o = others[p.i]; if (!o) o = others[p.i] = mk(p.x);
     o.f = p.f; o.rc = w.rk ? .2 : .12; if (!w.tkn) o.w = p.k;
-    spawnShot(p.x, p.y, p.f, p.k, false, p.sh, p.i);
+    o.cv = 0;
+    spawnShot(p.x, p.y, p.f, p.k, false, p.sh, p.i, p.pw);
     const v = Math.max(0, 1 - Math.abs(p.x - me.x) / 900);
     if (w.smg) sndSmg(v); else if (w.rk) sndBazooka(v); else twang(v);
   });
@@ -649,8 +733,8 @@ function connect(){
 let lastSig = '', lastSendT = 0;
 function sendState(force){
   if (!online) return;
-  const p = {i:myId, x:+me.x.toFixed(1), y:+me.y.toFixed(1), f:me.f, h:me.hp, w:me.w, m:me.moving, pu:me.pt >= 0, g:me.g ? 1 : 0, n:me.n, lg:me.lg, gb:me.gib ? 1 : 0, rl:me.rlOn ? 1 : 0, ps:me.ps, tk:me.tk, th:Math.round(me.thp)};
-  const sig = p.x + ',' + p.y + ',' + p.f + ',' + p.h + ',' + p.w + ',' + p.m + ',' + p.pu + ',' + p.g + ',' + p.lg + ',' + p.gb + ',' + p.rl + ',' + p.ps + ',' + p.tk + ',' + p.th, now = performance.now();
+  const p = {i:myId, x:+me.x.toFixed(1), y:+me.y.toFixed(1), f:me.f, h:me.hp, w:me.w, m:me.moving, pu:me.pt >= 0, g:me.g ? 1 : 0, n:me.n, lg:me.lg, gb:me.gib ? 1 : 0, rl:me.rlOn ? 1 : 0, ps:me.ps, tk:me.tk, th:Math.round(me.thp), sv:me.sv ? 1 : 0, bc:Math.round(me.cv * 10)};
+  const sig = p.x + ',' + p.y + ',' + p.f + ',' + p.h + ',' + p.w + ',' + p.m + ',' + p.pu + ',' + p.g + ',' + p.lg + ',' + p.gb + ',' + p.rl + ',' + p.ps + ',' + p.tk + ',' + p.th + ',' + p.sv + ',' + p.bc, now = performance.now();
   if (!force && sig === lastSig && now - lastSendT < 400) return;
   lastSig = sig; lastSendT = now;
   channel.send({type:'broadcast', event:'s', payload:p});
@@ -677,6 +761,25 @@ function doMelee(cw){
 
 /* ---------- 업데이트 ---------- */
 function update(dt){
+  const realDt = dt;   // 실제 흐른 시간. 아래 dt 는 구간마다 "그 대상의 시간"으로 바꿔 쓴다
+  // 산데비스탄: 누가 켰는지 보고 월드 시간 배율(wsc)을 부드럽게 조절
+  let anySv = me.sv;
+  for (const id in others){ const o = others[id]; if (o.sv && o.hp > 0) anySv = true; }
+  svAny = anySv;
+  wsc += ((anySv ? SV_SLOW : 1) - wsc) * Math.min(1, realDt * 5);
+  // 산데비스탄 에너지 (실제 시간 기준): 켜면 소모, 끄면 회복. 바닥나면 과열 잠금
+  if (me.sv){
+    me.svE -= 17 * realDt;
+    if (me.svE <= 0){ me.svE = 0; me.svLock = true; svOff(); }
+    else if (me.hp > 0 && me.tk < 0){
+      me.gacc += realDt;
+      if (me.gacc > .035){ me.gacc = 0; pushGhost(me); }   // 나만 남는 잔상
+    }
+  } else {
+    me.svE = Math.min(100, me.svE + 7 * realDt);
+    if (me.svLock && me.svE >= 40) me.svLock = false;
+  }
+  dt = realDt * tsOf(me);   // 내 시간: 산데비스탄이면 조금 빠르게, 남이 켰으면 느리게
   const g0 = gy(me.x);
   const cw = WEAPONS[me.w];
   me.pcd = Math.max(0, me.pcd - dt);
@@ -696,7 +799,7 @@ function update(dt){
     const dir = stunned ? 0 : (keys.R ? 1 : 0) - (keys.L ? 1 : 0);
     // 이동속도: 원거리 무기는 들고 쏘면서도 이동 가능, 다리가 잘리면 느려지고 둘 다 잘리면 기어 다님, 앉기/엎드리기는 더 느림
     const lgm = (me.lg >= 2 ? .26 : me.lg ? .72 : 1) * (me.lg >= 2 ? 1 : me.ps === 2 ? .3 : me.ps === 1 ? .55 : 1);
-    const mvm = me.tk >= 0 ? .72 : (me.pt >= 0 ? cw.mv : me.g ? .38 : cw.t === 'r' ? cw.mv : 1) * lgm;
+    const mvm = me.tk >= 0 ? .72 : (me.pt >= 0 ? cw.mv : me.g ? .38 : cw.t === 'r' ? cw.mv : 1) * lgm * (me.bc > 0 ? .55 : 1);   // 활 차징 중엔 느려짐
     if (stunned) me.vx *= Math.max(0, 1 - dt * 5);
     else if (dir){
       if (me.pt < 0 && !me.g) me.f = dir;      // 휘두르는 중/가드 중엔 방향 고정
@@ -718,11 +821,13 @@ function update(dt){
   } else {
     me.vx *= Math.max(0, 1 - dt * 6);
     me.rlOn = false;
+    if (me.sv) svOff();
     deadT -= dt;
     if (deadT <= 0){
       me.hp = 100; me.x = 300 + Math.random() * (WORLD - 600); me.y = 0; me.vx = me.vy = 0; me.pt = -1; me.stun = 0;
       me.g = false; me.gg = 100; me.glock = false; me.arrows = []; me.ammo = WEAPONS.map(w => w.max || 0);
       me.lg = 0; me.gib = false; me.dash = 0; me.km = 0; me.inv = 0; me.ps = 0; me.tk = -1;
+      me.sv = false; me.svE = 100; me.svLock = false; me.bc = 0; me.cv = 0;
     }
   }
   me.vy += GRAV * dt; me.x += me.vx * dt; me.y += me.vy * dt;
@@ -738,6 +843,7 @@ function update(dt){
   // 무기: 공격 입력, 근접 판정, 화살/총알/로켓
   me.cd = Math.max(0, me.cd - dt); me.rc = Math.max(0, me.rc - dt);
   me.kc1 = Math.max(0, me.kc1 - dt); me.kc2 = Math.max(0, me.kc2 - dt); me.inv = Math.max(0, me.inv - dt);
+  bowTick(dt);
   if (keys.A && started) attack();
   WEAPONS.forEach((g, i) => { if (g.t === 'r' && !g.rl && me.ammo[i] < g.max){ regen[i] = (regen[i] || 0) + dt; if (regen[i] > g.rg){ regen[i] = 0; me.ammo[i]++; } } });
   if (me.pt >= 0 && cw.t === 'm'){
@@ -752,9 +858,11 @@ function update(dt){
     }
     if (me.pt >= cw.dur){ me.pt = -1; me.km = 0; }
   }
+  dt = realDt * wsc;   // 여기부터는 월드(탄/이펙트) 시간: 산데비스탄이 켜져 있으면 느려짐
   for (let i = bullets.length - 1; i >= 0; i--){
     const b = bullets[i], px = b.x;
-    b.vy += (b.g || 0) * dt; b.x += b.vx * dt; b.y += b.vy * dt; b.life -= dt;
+    const bdt = b.fs ? realDt * SVK : dt;   // 산데비스탄 사용자가 쏜 탄은 느려지지 않음
+    b.vy += (b.g || 0) * bdt; b.x += b.vx * bdt; b.y += b.vy * bdt; b.life -= bdt;
     if (b.rk) dust.push({x:b.x - b.f * 14, y:b.y, vx:-b.f * 20, vy:-10 - Math.random() * 20, r:3, t:0, max:.6});
     let dead = b.life <= 0 || b.y > gy(b.x);
     if (b.own && !dead && online){
@@ -802,11 +910,11 @@ function update(dt){
     if (g.age > g.life) gibs.splice(i, 1);
   }
   for (let i = fires.length - 1; i >= 0; i--){ fires[i].t += dt; if (fires[i].t > .5) fires.splice(i, 1); }
-  for (let i = ghosts.length - 1; i >= 0; i--){ ghosts[i].t += dt; if (ghosts[i].t > .3) ghosts.splice(i, 1); }
-  for (let i = slashes.length - 1; i >= 0; i--){ slashes[i].t += dt; if (slashes[i].t > .3) slashes.splice(i, 1); }
-  for (let i = arcs.length - 1; i >= 0; i--){ arcs[i].t += dt; if (arcs[i].t > .22) arcs.splice(i, 1); }
+  for (let i = ghosts.length - 1; i >= 0; i--){ ghosts[i].t += realDt; if (ghosts[i].t > (ghosts[i].life || .3)) ghosts.splice(i, 1); }
+  for (let i = slashes.length - 1; i >= 0; i--){ slashes[i].t += realDt; if (slashes[i].t > .3) slashes.splice(i, 1); }
+  for (let i = arcs.length - 1; i >= 0; i--){ arcs[i].t += realDt; if (arcs[i].t > .22) arcs.splice(i, 1); }
   for (let i = waves.length - 1; i >= 0; i--){
-    const w = waves[i]; w.t += dt; w.x += w.vx * dt;
+    const w = waves[i], wd = w.fs ? realDt * SVK : dt; w.t += wd; w.x += w.vx * wd;
     if (w.own && online) for (const id in others){
       const o = others[id];
       if (!w.hit[id] && o.hp > 0 && Math.abs(o.x - w.x) < 28 + bodyW(o) && Math.abs(o.y - 45 - w.y) < 70){
@@ -814,7 +922,7 @@ function update(dt){
         channel.send({type:'broadcast', event:'hit', payload:{to:id, dir:w.f, dmg:16, kb:260, st:.15, gm:1.2, m:0, a:myId, lc:.3}});
       }
     }
-    if (Math.random() < dt * 40) sparks.push({x:w.x - w.f * 20, y:w.y + (Math.random() - .5) * 80, vx:-w.f * 80, vy:(Math.random() - .5) * 120, t:0, life:.3, w:1.4, c:'180,230,255'});
+    if (Math.random() < wd * 40) sparks.push({x:w.x - w.f * 20, y:w.y + (Math.random() - .5) * 80, vx:-w.f * 80, vy:(Math.random() - .5) * 120, t:0, life:.3, w:1.4, c:'180,230,255'});
     if (w.t > w.life || w.x < 0 || w.x > WORLD) waves.splice(i, 1);
   }
   for (let i = dust.length - 1; i >= 0; i--){
@@ -843,16 +951,21 @@ function update(dt){
   for (let i = mists.length - 1; i >= 0; i--){ const m = mists[i]; m.t += dt; m.x += m.vx * dt; m.y += m.vy * dt; m.r += 18 * dt; if (m.t > m.max) mists.splice(i, 1); }
   for (let i = stains.length - 1; i >= 0; i--){ stains[i].t += dt; if (stains[i].t > stains[i].life) stains.splice(i, 1); }
 
-  // 다른 플레이어 보간
+  // 다른 플레이어 보간 (위치는 실제 시간으로 따라가고, 애니메이션은 그 사람의 시간 배율로 재생)
   const now = performance.now();
   for (const id in others){
     const o = others[id];
     if (now - o.seen > 4000){ delete others[id]; continue; }
     const px = o.x;
-    o.x += (o.tx - o.x) * Math.min(1, dt * 14); o.y += (o.ty - o.y) * Math.min(1, dt * 14);
+    dt = realDt * tsOf(o);
+    o.x += (o.tx - o.x) * Math.min(1, realDt * 14); o.y += (o.ty - o.y) * Math.min(1, realDt * 14);
     if (o.moving || Math.abs(o.x - px) > 0.3) o.walk += dt * (o.lg >= 2 || o.ps === 2 ? 6 : 11);
     o.rc = Math.max(0, o.rc - dt);
-    if (o.dashT > 0){ o.dashT -= dt; ghosts.push({p:{...o, arrows:[], flash:1, g:false}, t:0}); }
+    if (o.dashT > 0){ o.dashT -= realDt; ghosts.push({p:{...o, arrows:[], flash:1, g:false}, t:0}); }
+    if (o.sv && o.hp > 0 && o.tk < 0){
+      o.gacc += realDt;
+      if (o.gacc > .035){ o.gacc = 0; pushGhost(o); }   // 산데비스탄을 켠 상대의 잔상
+    }
     if (o.rlOn){ o.rlt += dt; const rw = WEAPONS[o.w]; if (!rw || !rw.rl || o.rlt > rw.rl + .4) o.rlOn = false; }
     if (o.pt >= 0){
       const w = WEAPONS[o.w] || WEAPONS[1];
@@ -866,9 +979,10 @@ function update(dt){
     o.flash = Math.max(0, o.flash - dt); o.bf = Math.max(0, o.bf - dt);
     tickArrows(o, dt); tickStumps(o, dt);
   }
+  dt = realDt * tsOf(me);
   me.tkcd = Math.max(0, me.tkcd - dt);
-  tankSmoke(me, me.thp, dt);
-  for (const id in others) tankSmoke(others[id], others[id].th, dt);
+  tankSmoke(me, me.thp, realDt * wsc);
+  for (const id in others) tankSmoke(others[id], others[id].th, realDt * wsc);
 }
 
 /* ---------- 그리기 ---------- */
@@ -949,13 +1063,24 @@ function drawShield(cx, cy, f, bf, bt){
   ctx.fillStyle = bf > 0 ? '#ffffff' : '#9aa3ad'; ctx.beginPath(); ctx.arc(8, 0, 3.5, 0, 7); ctx.fill();
   ctx.restore();
 }
-function drawBow(fx, fy, f, rc){
+// cv: 차징 정도(0~1). 차징 중엔 시위를 뒤로 당기고 화살을 걸어 보여줌
+function drawBow(fx, fy, f, rc, cv){
+  cv = cv || 0;
   ctx.save(); ctx.translate(fx, fy); ctx.scale(f, 1);
   ctx.strokeStyle = '#000'; ctx.lineWidth = 3; ctx.lineCap = 'round';
   ctx.beginPath(); ctx.arc(-14, 0, 16, -1.2, 1.2); ctx.stroke();
-  const tipx = -14 + 16 * Math.cos(1.2), tipy = 16 * Math.sin(1.2), pull = rc > 0 ? 0 : 5;
+  const tipx = -14 + 16 * Math.cos(1.2), tipy = 16 * Math.sin(1.2), pull = cv > 0 ? 5 + cv * 14 : rc > 0 ? 0 : 5;
   ctx.lineWidth = 1; ctx.strokeStyle = 'rgba(0,0,0,.85)';
   ctx.beginPath(); ctx.moveTo(tipx, -tipy); ctx.lineTo(tipx - pull, 0); ctx.lineTo(tipx, tipy); ctx.stroke();
+  if (cv > 0){
+    const ax = tipx - pull, full = cv >= 1;
+    if (full){ ctx.shadowColor = '#ffe27a'; ctx.shadowBlur = 8; }
+    ctx.strokeStyle = '#8a6f4a'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(ax, 0); ctx.lineTo(ax + 34, 0); ctx.stroke();
+    ctx.strokeStyle = '#d8d2c2'; ctx.lineWidth = 1.4;
+    ctx.beginPath(); ctx.moveTo(ax + 3, 0); ctx.lineTo(ax - 1, -3); ctx.moveTo(ax + 3, 0); ctx.lineTo(ax - 1, 3); ctx.stroke();
+    ctx.fillStyle = full ? '#fff2a8' : '#cfd3da'; ctx.beginPath(); ctx.moveTo(ax + 34, -2.6); ctx.lineTo(ax + 40, 0); ctx.lineTo(ax + 34, 2.6); ctx.fill();
+  }
   ctx.restore();
 }
 /* --- 기관단총: 장전 모션 (u: 0~1) 탄창 분리 → 허리춤에서 새 탄창 → 삽입 → 장전손잡이 당김 --- */
@@ -1016,7 +1141,7 @@ function drawRocket(hx, hy, ax){
 function person(p, label, ghost){
   const lg = p.lg || 0, ps = p.ps || 0, crawl = p.hp > 0 && (lg >= 2 || ps === 2), cr1 = p.hp > 0 && !crawl && ps === 1;
   const air = !crawl && p.y < gy(p.x) - 2, mv = p.moving ? 1 : 0, f = p.f;
-  const x = p.x, hipY = p.y - (cr1 ? 17 : 36), shY = p.y - (cr1 ? 44 : 64), col = p.flash > 0 ? '#ffffff' : '#000';
+  const x = p.x, hipY = p.y - (cr1 ? 17 : 36), shY = p.y - (cr1 ? 44 : 64), col = p.gc || (p.flash > 0 ? '#ffffff' : '#000');
   ctx.save();
   if (p.hp <= 0){ ctx.translate(x, p.y); ctx.rotate(-Math.PI / 2 * f); ctx.translate(-x, -p.y); ctx.globalAlpha = .7; }
   ctx.strokeStyle = ctx.fillStyle = col;
@@ -1086,7 +1211,7 @@ function person(p, label, ghost){
     drawBazooka(sx0, sy0, f, gs.t, p.rc || 0, ru < 0 ? (p === me ? me.ammo[me.w] >= 1 : true) : ru >= .85);
     if (gs.hold) drawRocket(gs.h[0], gs.h[1], gs.ax);
   }
-  else if (ranged) drawBow(fx, fy, f, p.rc || 0);
+  else if (ranged) drawBow(fx, fy, f, p.rc || 0, p.cv || 0);
   else {
     const ba = swingAngle(wp, t);
     if (t >= 0 && !wp.sp && t >= wp.w1 && t < wp.w2 + .04) swingTrail(wp, fx, fy, f, ba);
@@ -1099,6 +1224,10 @@ function person(p, label, ghost){
     const top = crawl ? 40 : cr1 ? 74 : 100;
     ctx.fillStyle = 'rgba(0,0,0,.45)'; ctx.fillRect(x - 18, p.y - top, 36, 4);
     ctx.fillStyle = '#b33'; ctx.fillRect(x - 18, p.y - top, 36 * p.hp / 100, 4);
+    if (p.cv > 0){   // 활 차징 게이지
+      ctx.fillStyle = 'rgba(0,0,0,.45)'; ctx.fillRect(x - 18, p.y - top + 6, 36, 3);
+      ctx.fillStyle = p.cv >= 1 ? '#fff2a8' : '#e0a93a'; ctx.fillRect(x - 18, p.y - top + 6, 36 * Math.min(1, p.cv), 3);
+    }
     if (label){ ctx.fillStyle = '#9aa0a8'; ctx.font = '11px system-ui'; ctx.textAlign = 'center'; ctx.fillText(label, x, p.y - top - 6); }
   }
 }
@@ -1239,6 +1368,17 @@ function sndDash(v){
   if (!ac || v <= 0) return;
   nz(.25, 2500, 'bandpass', .5 * v, 1.5); tn(2200, 300, .2, .25 * v, 'sawtooth'); tn(3000, 2800, .4, .1 * v, 'sine');
 }
+// 산데비스탄: 켤 때는 전자음이 치솟고 심장 박동 같은 저음, 끌 때는 반대로 꺼지는 소리
+function sndSv(on, v){
+  if (!ac || v <= 0) return;
+  if (on){
+    tn(70, 900, .45, .5 * v, 'sawtooth'); nz(.4, 2000, 'bandpass', .35 * v, 1.5); tn(1200, 2400, .5, .12 * v, 'sine');
+    setTimeout(() => { if (ac) tn(60, 38, .5, .6 * v, 'sine'); }, 130);
+    setTimeout(() => { if (ac) tn(60, 38, .4, .45 * v, 'sine'); }, 330);
+  } else {
+    tn(900, 60, .5, .4 * v, 'sawtooth'); nz(.3, 800, 'lowpass', .3 * v, 2);
+  }
+}
 function thunder(){
   if (!ac) return;
   const len = ac.sampleRate * 3, buf = ac.createBuffer(1, len, ac.sampleRate), d = buf.getChannelData(0);
@@ -1287,7 +1427,7 @@ function frame(t){
   const rdt = Math.min(0.05, (t - last) / 1000); last = t;
   const dt = slow > 0 ? rdt * 0.1 : rdt;   // 히트스톱 (타격 순간 거의 멈춤)
   slow = Math.max(0, slow - rdt);
-  update(dt); lightningTick(dt);
+  update(dt); lightningTick(dt * wsc);   // 산데비스탄 중엔 번개 주기도 느려짐
 
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
   const gr = ctx.createLinearGradient(0, 0, 0, H);
@@ -1331,12 +1471,12 @@ function frame(t){
     }
     ctx.stroke();
   }
-  // 바닥에 튕기는 빗물
-  splashAcc += dt * 60; let sn = Math.floor(splashAcc); splashAcc -= sn;
+  // 바닥에 튕기는 빗물 (산데비스탄 중엔 느리게 튐)
+  splashAcc += dt * wsc * 60; let sn = Math.floor(splashAcc); splashAcc -= sn;
   while (sn-- > 0 && splashes.length < 160) splashes.push({x:camX + Math.random() * viewW, t:0, s:.6 + Math.random() * .8});
   ctx.lineWidth = 1;
   for (let i = splashes.length - 1; i >= 0; i--){
-    const sp = splashes[i]; sp.t += dt; const k = sp.t / .32;
+    const sp = splashes[i]; sp.t += dt * wsc; const k = sp.t / .32;
     if (k >= 1){ splashes.splice(i, 1); continue; }
     const sy0 = gy(sp.x);
     ctx.strokeStyle = 'rgba(190,205,225,' + (0.55 * (1 - k)) + ')';
@@ -1350,8 +1490,8 @@ function frame(t){
     ctx.fillStyle = 'rgba(110,12,12,' + (Math.min(1, (s.life - s.t) / 4) * .85) + ')';
     ctx.beginPath(); ctx.ellipse(s.x, gy(s.x) + .5, s.w, s.w * .22, 0, 0, 7); ctx.fill();
   }
-  // 발도술 잔상
-  for (const g of ghosts){ ctx.globalAlpha = .45 * (1 - g.t / .3); person(g.p, '', 1); }
+  // 잔상 (발도술 + 산데비스탄)
+  for (const g of ghosts){ ctx.globalAlpha = (g.p.gc ? .5 : .45) * (1 - g.t / (g.life || .3)); person(g.p, '', 1); }
   ctx.globalAlpha = 1;
   // 캐릭터 (분쇄된 캐릭터/전차 탑승 중인 캐릭터는 그리지 않음 / 내 닉네임 앞에는 🟢 온라인 표시)
   for (const id in others){ const o = others[id]; if (!o.gib){ if (o.tk >= 0) drawTank(o, o.th, o.n || id.slice(0, 3)); else person(o, o.n || id.slice(0, 3)); } }
@@ -1366,7 +1506,8 @@ function frame(t){
       ctx.fillStyle = 'rgba(255,170,60,.95)'; ctx.beginPath(); ctx.arc(-17, 0, 4 + Math.random() * 3, 0, 7); ctx.fill();
       ctx.restore();
     } else {
-      ctx.strokeStyle = b.smg ? 'rgba(255,230,150,.95)' : 'rgba(235,215,170,.95)'; ctx.lineWidth = b.smg ? 1.8 : 2.5;
+      const full = !b.smg && b.pw > .9;   // 풀 차징 화살은 굵고 밝게
+      ctx.strokeStyle = b.smg ? 'rgba(255,230,150,.95)' : full ? 'rgba(255,248,200,1)' : 'rgba(235,215,170,.95)'; ctx.lineWidth = b.smg ? 1.8 : full ? 3.4 : 2.5;
       ctx.beginPath(); ctx.moveTo(b.x, b.y); ctx.lineTo(b.x - b.vx * (b.smg ? .018 : .026), b.y - b.vy * .026); ctx.stroke();
     }
   }
@@ -1480,12 +1621,26 @@ function frame(t){
   }
   ctx.globalAlpha = 1;
 
-  // 비 (화면 좌표)
+  // 비 (화면 좌표) - 산데비스탄 중엔 느리게 내림
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
-  rain(rdt);
+  rain(rdt * wsc);
   const vg = ctx.createRadialGradient(W / 2, H * 0.55, Math.min(W, H) * 0.25, W / 2, H * 0.55, Math.max(W, H) * 0.75);
   vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(0,0,0,.7)');
   ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H);
+  // 산데비스탄 화면 연출: 시간이 느려질수록 푸른 톤 + 가장자리 색 번짐 (내가 켜면 붉은색, 남이 켜면 청색)
+  const sk = Math.max(0, Math.min(1, (1 - wsc) / (1 - SV_SLOW)));
+  if (sk > .01){
+    ctx.fillStyle = 'rgba(10,40,70,' + (.2 * sk) + ')'; ctx.fillRect(0, 0, W, H);
+    const ec = me.sv ? '255,30,90' : '30,200,255';
+    const sg = ctx.createRadialGradient(W / 2, H * 0.55, Math.min(W, H) * 0.2, W / 2, H * 0.55, Math.max(W, H) * 0.7);
+    sg.addColorStop(0, 'rgba(' + ec + ',0)'); sg.addColorStop(1, 'rgba(' + ec + ',' + (.38 * sk) + ')');
+    ctx.fillStyle = sg; ctx.fillRect(0, 0, W, H);
+    if (me.sv){   // 속도선
+      ctx.strokeStyle = 'rgba(255,255,255,.16)'; ctx.lineWidth = 1; ctx.beginPath();
+      for (let i = 0; i < 10; i++){ const yy = Math.random() * H, xx = Math.random() * W, ll = 60 + Math.random() * 160; ctx.moveTo(xx, yy); ctx.lineTo(xx - me.f * ll, yy); }
+      ctx.stroke();
+    }
+  }
   if (ifl > .01){ ctx.fillStyle = 'rgba(255,255,255,' + ifl + ')'; ctx.fillRect(0, 0, W, H); }
   ifl = Math.max(0, ifl - rdt * 2);
 
@@ -1493,9 +1648,10 @@ function frame(t){
   bk1El.style.opacity = me.kc1 > 0 ? .35 : 1; bk2El.style.opacity = me.kc2 > 0 ? .35 : 1;
   hpEl.style.width = (me.tk >= 0 ? me.thp / TANK_HP * 100 : me.hp) + '%'; hpEl.style.background = me.tk >= 0 ? '#c8892a' : '#a33';
   ggEl.style.width = me.gg + '%'; ggEl.style.background = me.glock ? '#b7793a' : '#5a8fc7';
+  svEl.style.width = me.svE + '%'; svEl.style.background = me.sv ? '#ff2a6d' : me.svLock ? '#b7793a' : '#05d9e8';
   { const wp = WEAPONS[me.w]; wlEl.textContent = wp.ic + ' ' + wp.n + (wp.t === 'r' ? '  ' + (me.rlOn ? '장전 중…' : me.ammo[me.w] + '/' + wp.max) : '') + (me.lg >= 2 ? ' · 기어가는 중' : me.lg ? ' · 다리 부상' : '') + (me.ps === 2 ? ' · 엎드림' : me.ps === 1 ? ' · 앉음' : '');
     if (me.tk >= 0) wlEl.textContent = '🚙 전차 ' + Math.round(me.thp) + '/' + TANK_HP + (me.cd > 0 ? ' · 장전 중…' : ''); }
-  msgEl.textContent = !started ? '' : !configured ? '🔴 오프라인\n(Supabase 키 미설정)' : online ? '🟢 ' + (Object.keys(others).length + 1) + '명 접속' : '🟠 연결 중…';
+  msgEl.textContent = !started ? '' : (!configured ? '🔴 오프라인\n(Supabase 키 미설정)' : online ? '🟢 ' + (Object.keys(others).length + 1) + '명 접속' : '🟠 연결 중…') + (svAny ? (me.sv ? '\n⏱ 산데비스탄 작동 중' : '\n⏱ 시간 지연 중') : '');
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);

@@ -94,9 +94,10 @@ const WORLD = 3000, GRAV = 1500, SPEED = 190, JUMP = 560, PARRY = .16;
 /* ---------- 산데비스탄 (시간 지연) ----------
    SV_SLOW: 누군가 산데비스탄을 켜면 켜지 않은 모든 것(플레이어·탄·비·이펙트)이 이 배율로 느려짐
    SVK:     산데비스탄 사용자의 시간 배율 (다른 사람이 느려진 만큼 + 조금 더 빠름)
-   서로 켜면 둘 다 SVK 로 같은 속도 → 동등하게 움직임                                       */
-const SV_SLOW = .1, SVK = 2.7;
-const ADAM_HP = 400, ADAM_T = 10000;   // 아담 스매셔: 변신 체력 / 지속시간(초)
+   서로 켜면 둘 다 SVK 로 같은 속도 → 동등하게 움직임
+   SV_DRAIN / SV_DRAIN_AD: 초당 에너지 소모량 (아담 스매셔 변신 중엔 훨씬 적게 닳아서 오래 쓸 수 있음) */
+const SV_SLOW = .3, SVK = 1.25, SV_DRAIN = 17, SV_DRAIN_AD = 5;
+const ADAM_HP = 400, ADAM_T = 25;   // 아담 스매셔: 변신 체력 / 지속시간(초)
 const BOW_MIN = .05;   // 활 조준각 최저(거의 수평) / 최고는 1.25 (약 72°)
 let wsc = 1, svAny = false;                       // wsc: 현재 월드 시간 배율 (부드럽게 변함)
 const tsOf = p => p.sv ? SVK : wsc;               // 해당 플레이어의 시간 배율
@@ -251,7 +252,8 @@ function mountTank(){
 function toggleTank(){ if (me.tk >= 0) dismount(8); else mountTank(); }
 function toggleBt(){ if (me.ad) toggleAd(); else toggleTank(); }
 /* ---------- 아담 스매셔: 인벤토리에서 고르면 거대 사이보그로 변신 (25초) ----------
-   미니건(공격 버튼) / 🚀 미사일 3연발(E) / 👊 내려찍기(Q). 받는 피해가 줄고 넉백·기절을 거의 안 받음 */
+   미니건(공격 버튼) / 🚀 미사일 3연발(E) / 👊 내려찍기(Q). 받는 피해가 줄고 넉백·기절을 거의 안 받음
+   변신 중에도 산데비스탄(SV)을 쓸 수 있고, 이때는 에너지가 훨씬 천천히 닳음 */
 function mountAd(){
   if (!started || me.hp <= 0 || me.ad || me.tk >= 0 || me.adcd > 0) return;
   me.ad = 1; me.ahp = ADAM_HP; me.adT = ADAM_T;
@@ -273,7 +275,6 @@ function adFx(x, y){
     sparks.push({x, y:y - 60, vx:Math.cos(a) * sp, vy:Math.sin(a) * sp - 100, t:0, life:.3 + Math.random() * .5, w:1.5 + Math.random() * 2, c:i % 3 ? '255,60,60' : '230,235,245'});
   }
   bursts.push({x, y:y - 60, t:0, r:60, c:'255,60,60'});
-  texts.push({x, y:y - 150, v:'ADAM SMASHER', t:0, sz:20, c:'#ff3b3b'});
   impactFx(x, 1, false, .7);
 }
 // 스매셔 상태로 맞았을 때: 피해 감소, 넉백은 거의 없음 (폭발은 풀 데미지)
@@ -494,7 +495,7 @@ function tankSlot(){
 function adSlot(){
   const st = me.ad ? 'HP ' + Math.round(me.ahp) + '/' + ADAM_HP : me.adcd > 0 ? '재변신 ' + Math.ceil(me.adcd) + '초' : '';
   return '<div class="slot' + (me.ad ? ' sel' : '') + '" data-i="ad"><div class="si">🦾</div><div class="sn">아담 스매셔</div>' +
-    '<div class="pr">+ 거대 사이보그 · 미니건 · 미사일 · 내려찍기</div><div class="co">− ' + ADAM_T + '초 제한 · 큰 표적 · 느림</div>' + (st ? '<div class="sa">' + st + '</div>' : '') + '</div>';
+    '<div class="pr">+ 거대 사이보그 · 미니건 · 미사일 · 내려찍기 · 산데비스탄 장시간</div><div class="co">− ' + ADAM_T + '초 제한 · 큰 표적 · 느림</div>' + (st ? '<div class="sa">' + st + '</div>' : '') + '</div>';
 }
 function renderInv(){
   invp.innerHTML = '<div class="grid">' + WEAPONS.map((w, i) => w.hid ? '' :
@@ -931,8 +932,9 @@ function update(dt){
   svAny = anySv;
   wsc += ((anySv ? SV_SLOW : 1) - wsc) * Math.min(1, realDt * 5);
   // 산데비스탄 에너지 (실제 시간 기준): 켜면 소모, 끄면 회복. 바닥나면 과열 잠금
+  // 아담 스매셔로 변신 중이면 소모량이 훨씬 적어서 오래 유지할 수 있음
   if (me.sv){
-    me.svE -= 17 * realDt;
+    me.svE -= (me.ad ? SV_DRAIN_AD : SV_DRAIN) * realDt;
     if (me.svE <= 0){ me.svE = 0; me.svLock = true; svOff(); }
     else if (me.hp > 0 && me.tk < 0){
       me.gacc += realDt;

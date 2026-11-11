@@ -32,6 +32,12 @@
   #bt{font-size:calc(var(--b) * .27);font-weight:700}
   #brl,#bk1,#bk2,#bt{display:none}
   #inv{position:fixed;top:calc(var(--st) + 62px);right:calc(var(--sr) + 12px);width:46px;height:46px;border-radius:50%;background:rgba(0,0,0,.6);border:2px solid rgba(255,255,255,.2);color:#fff;font-size:22px;display:flex;align-items:center;justify-content:center;z-index:5}
+  #emo{position:fixed;top:calc(var(--st) + 116px);right:calc(var(--sr) + 12px);width:46px;height:46px;border-radius:50%;background:rgba(0,0,0,.6);border:2px solid rgba(255,255,255,.2);color:#fff;font-size:22px;display:flex;align-items:center;justify-content:center;z-index:5}
+  #emop{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;align-items:center;justify-content:center;z-index:10}
+  .eg{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;width:min(300px,86vw)}
+  .eb{background:#1b1d20;border:2px solid #3a3d42;border-radius:14px;font-size:34px;padding:10px 0;text-align:center;line-height:1.1;position:relative}
+  .eb:active{border-color:#c33}
+  .eb small{position:absolute;left:6px;top:3px;font-size:10px;color:#6b727c}
   #invp{position:fixed;inset:0;background:rgba(0,0,0,.78);display:none;align-items:center;justify-content:center;z-index:10}
   .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(98px,1fr));gap:8px;width:min(420px,94vw);max-height:88vh;overflow-y:auto;touch-action:pan-y}
   .grid *{touch-action:pan-y}
@@ -60,6 +66,7 @@
 <div class="btn" id="bk2">⚡</div><div class="btn" id="bj">⤒</div><div class="btn" id="bp">⚔️</div>
 </div>
 <div id="inv">🎒</div><div id="invp"></div>
+<div id="emo">😀</div><div id="emop"></div>
 <div id="nick"><div class="box"><div class="t">Rain Arena</div><div class="s">닉네임을 정하고 입장하세요</div><input id="ni" maxlength="8" placeholder="닉네임 (최대 8자)" autocomplete="off"><button id="go">입장</button></div></div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
@@ -73,12 +80,13 @@ const cv = document.getElementById('c'), ctx = cv.getContext('2d');
 const hpEl = document.getElementById('hp'), ggEl = document.getElementById('gg'), msgEl = document.getElementById('msg'), wlEl = document.getElementById('wl'), invp = document.getElementById('invp'), bpEl = document.getElementById('bp'), brlEl = document.getElementById('brl'), bk1El = document.getElementById('bk1'), bk2El = document.getElementById('bk2');
 const bjEl = document.getElementById('bj'), bsEl = document.getElementById('bs'), bcrEl = document.getElementById('bcr'), bprEl = document.getElementById('bpr'), btEl = document.getElementById('bt');
 const svEl = document.getElementById('sv'), bsvEl = document.getElementById('bsv');
+const emop = document.getElementById('emop');
 const WORLD = 3000, GRAV = 1500, SPEED = 190, JUMP = 560, PARRY = .16;
 /* ---------- 산데비스탄 (시간 지연) ----------
    SV_SLOW: 누군가 산데비스탄을 켜면 켜지 않은 모든 것(플레이어·탄·비·이펙트)이 이 배율로 느려짐
    SVK:     산데비스탄 사용자의 시간 배율 (다른 사람이 느려진 만큼 + 조금 더 빠름)
    서로 켜면 둘 다 SVK 로 같은 속도 → 동등하게 움직임                                       */
-const SV_SLOW = .2, SVK = 1.7;
+const SV_SLOW = .1, SVK = 1.7;
 const BOW_MIN = .05;   // 활 조준각 최저(거의 수평) / 최고는 1.25 (약 72°)
 let wsc = 1, svAny = false;                       // wsc: 현재 월드 시간 배율 (부드럽게 변함)
 const tsOf = p => p.sv ? SVK : wsc;               // 해당 플레이어의 시간 배율
@@ -95,7 +103,7 @@ addEventListener('resize', resize); resize();
 const myId = Math.random().toString(36).slice(2, 8);
 // lg: 잘린 다리 수(0~2) / gib: 분쇄됨 / rlOn,rlt: 장전 중, 경과 시간 / ps: 자세(0 서기, 1 앉기, 2 엎드리기) / tk: 탑승 중인 전차 번호(-1 없음), th: 전차 체력
 // sv: 산데비스탄 사용 중 / bc: 활 차징 시간, cv: 차징 비율(0~1)
-const mk = (x) => ({x, y:0, vx:0, vy:0, f:1, hp:100, walk:0, moving:false, pt:-1, w:1, rc:0, pu:false, hitDone:false, flash:0, stun:0, tx:x, ty:0, seen:performance.now(), g:false, bf:0, bt:0, sw:false, n:'', arrows:[], lg:0, gib:false, rlOn:false, rlt:0, rlPrev:false, sd:0, ps:0, tk:-1, th:0, sv:false, bc:0, cv:0, gacc:0, aim:BOW_MIN});
+const mk = (x) => ({x, y:0, vx:0, vy:0, f:1, hp:100, walk:0, moving:false, pt:-1, w:1, rc:0, pu:false, hitDone:false, flash:0, stun:0, tx:x, ty:0, seen:performance.now(), g:false, bf:0, bt:0, sw:false, n:'', arrows:[], lg:0, gib:false, rlOn:false, rlt:0, rlPrev:false, sd:0, ps:0, tk:-1, th:0, sv:false, bc:0, cv:0, gacc:0, aim:BOW_MIN, em:'', emt:0});
 const me = mk(WORLD/2 + (Math.random()-.5)*600);
 me.gt = 0; me.gg = 100; me.glock = false; me.pcd = 0; me.pOk = false; me.n = '플레이어';
 const others = {};
@@ -136,7 +144,7 @@ const bodyH = p => p.tk >= 0 ? 100 : isProne(p) ? 30 : p.ps === 1 ? 58 : 90;   /
 const bodyW = p => p.tk >= 0 ? 88 : isProne(p) ? 26 : 0;                       // 옆으로 넓은 몸
 me.ammo = WEAPONS.map(w => w.max || 0); me.cd = 0;
 me.kc1 = 0; me.kc2 = 0; me.inv = 0; me.dash = 0; me.km = 0; me.dx0 = 0; me.thp = 0; me.tkcd = 0;
-me.svE = 100; me.svLock = false;
+me.svE = 100; me.svLock = false; me.emcd = 0;
 const bullets = [], muz = [], regen = [];
 
 /* ---------- 이펙트 상태 ---------- */
@@ -185,6 +193,7 @@ bindBtn('bsv', () => useSv());
 const isG = k => ['l','L','s','S','Shift'].includes(k);
 addEventListener('keydown', e => {
   if (!started || e.repeat) return;
+  if (emop.style.display === 'flex' && e.key >= '1' && e.key <= '9'){ sendEmote(+e.key - 1); return; }   // 이모티콘 창이 열려 있으면 숫자키로 바로 선택
   if (['ArrowLeft','a','A'].includes(e.key)) keys.L = true;
   if (['ArrowRight','d','D'].includes(e.key)) keys.R = true;
   if (['ArrowUp','w','W',' '].includes(e.key)){ wantJump = true; keys.U = true; }
@@ -200,6 +209,7 @@ addEventListener('keydown', e => {
   if (e.key === 'z' || e.key === 'Z') setPose(2);
   if (e.key === 'f' || e.key === 'F') toggleTank();
   if (e.key === 'x' || e.key === 'X') useSv();
+  if (e.key === 't' || e.key === 'T') toggleEmo();
 });
 addEventListener('keyup', e => {
   if (['ArrowLeft','a','A'].includes(e.key)) keys.L = false;
@@ -407,6 +417,39 @@ function renderInv(){
     (w.t === 'r' ? '<div class="sa">' + me.ammo[i] + '/' + w.max + '</div>' : '') + '</div>').join('') + tankSlot() + '</div>';
 }
 function toggleInv(){ const on = invp.style.display !== 'flex'; invp.style.display = on ? 'flex' : 'none'; if (on) renderInv(); }
+/* ---------- 이모티콘: 목록에서 고르면 머리 위에 말풍선으로 2.5초간 떠오르고, 다른 플레이어에게도 보임 ---------- */
+const EMOTES = ['😀','😂','😡','😭','👍','👋','❤️','💀','😎','🔥','❓','🙏'], EMT = 2.5;
+function toggleEmo(){
+  const on = emop.style.display !== 'flex';
+  emop.style.display = on ? 'flex' : 'none';
+  if (on){
+    invp.style.display = 'none';
+    emop.innerHTML = '<div class="eg">' + EMOTES.map((e, i) => '<div class="eb" data-i="' + i + '">' + (i < 9 ? '<small>' + (i + 1) + '</small>' : '') + e + '</div>').join('') + '</div>';
+  }
+}
+function sendEmote(i){
+  emop.style.display = 'none';
+  if (!started || me.hp <= 0 || me.emcd > 0 || !EMOTES[i]) return;
+  me.em = EMOTES[i]; me.emt = EMT; me.emcd = .8;
+  emoteSfx(1);
+  if (online) channel.send({type:'broadcast', event:'em', payload:{i:myId, e:i}});
+}
+function emoteSfx(v){ if (ac && v > 0) tn(520, 980, .09, .16 * v, 'sine'); }
+function drawEmote(p){
+  if (p.emt <= 0 || p.hp <= 0) return;
+  const age = EMT - p.emt, a = Math.min(1, p.emt / .4);
+  const top = p.tk >= 0 ? 138 : (p.lg >= 2 || p.ps === 2) ? 40 : p.ps === 1 ? 74 : 100;
+  const pop = age < .18 ? .4 + 1.0 * (age / .18) : age < .3 ? 1.4 - .4 * ((age - .18) / .12) : 1;   // 톡 튀어나오는 느낌
+  const x = p.x, y = p.y - top - 34 - Math.min(age, 1) * 10 + Math.sin(age * 5) * 1.5;
+  ctx.save(); ctx.globalAlpha = a; ctx.translate(x, y); ctx.scale(pop, pop);
+  ctx.fillStyle = 'rgba(235,240,248,.92)'; ctx.strokeStyle = 'rgba(0,0,0,.55)'; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.ellipse(0, 0, 19, 17, 0, 0, 7); ctx.fill(); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(-5, 14); ctx.lineTo(0, 24); ctx.lineTo(5, 14); ctx.closePath(); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = 'rgba(235,240,248,.95)'; ctx.fillRect(-4, 13, 8, 3);
+  ctx.font = '22px system-ui, "Apple Color Emoji", "Noto Color Emoji", sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(p.em, 0, 1);
+  ctx.restore();
+}
 function selW(i){
   if (!WEAPONS[i] || WEAPONS[i].hid) return;
   if (me.tk >= 0) dismount(8);
@@ -416,7 +459,9 @@ function selW(i){
   invp.style.display = 'none'; sendState(true);
 }
 invp.addEventListener('click', e => { const sl = e.target.closest('.slot'); if (sl){ if (sl.dataset.i === 'tank'){ invp.style.display = 'none'; toggleTank(); } else selW(+sl.dataset.i); } else toggleInv(); });
-document.getElementById('inv').addEventListener('pointerdown', e => { e.preventDefault(); toggleInv(); });
+document.getElementById('inv').addEventListener('pointerdown', e => { e.preventDefault(); emop.style.display = 'none'; toggleInv(); });
+document.getElementById('emo').addEventListener('pointerdown', e => { e.preventDefault(); toggleEmo(); });
+emop.addEventListener('click', e => { const b = e.target.closest('.eb'); if (b) sendEmote(+b.dataset.i); else emop.style.display = 'none'; });
 bpEl.textContent = WEAPONS[me.w].ic;
 // 상태에 따라 버튼 표시/숨김 (자리는 grid에 고정돼 있어서 서로 겹치거나 밀리지 않음)
 function updateBtns(){
@@ -740,6 +785,11 @@ function connect(){
     for (let i = bullets.length - 1; i >= 0; i--) if (bullets[i].rk && !bullets[i].own && bullets[i].sid === p.i) bullets.splice(i, 1);
   });
   channel.on('broadcast', {event:'fx'}, ({payload:p}) => { impactFx(p.x, p.f, !!p.g, p.s || 1); });
+  channel.on('broadcast', {event:'em'}, ({payload:p}) => {
+    const o = others[p.i]; if (!o || !EMOTES[p.e]) return;
+    o.em = EMOTES[p.e]; o.emt = EMT;
+    emoteSfx(Math.max(0, 1 - Math.abs(o.x - me.x) / 900));
+  });
   channel.on('broadcast', {event:'bye'}, ({payload:p}) => { delete others[p.i]; });
   channel.subscribe(s => { online = (s === 'SUBSCRIBED'); if (online) sendState(true); });
   addEventListener('beforeunload', () => channel.send({type:'broadcast', event:'bye', payload:{i:myId}}));
@@ -794,6 +844,7 @@ function update(dt){
     me.svE = Math.min(100, me.svE + 7 * realDt);
     if (me.svLock && me.svE >= 40) me.svLock = false;
   }
+  me.emt = Math.max(0, me.emt - realDt); me.emcd = Math.max(0, me.emcd - realDt);
   dt = realDt * tsOf(me);   // 내 시간: 산데비스탄이면 조금 빠르게, 남이 켰으면 느리게
   const g0 = gy(me.x);
   const cw = WEAPONS[me.w];
@@ -972,6 +1023,7 @@ function update(dt){
     const o = others[id];
     if (now - o.seen > 4000){ delete others[id]; continue; }
     const px = o.x;
+    o.emt = Math.max(0, o.emt - realDt);
     dt = realDt * tsOf(o);
     o.x += (o.tx - o.x) * Math.min(1, realDt * 14); o.y += (o.ty - o.y) * Math.min(1, realDt * 14);
     if (o.moving || Math.abs(o.x - px) > 0.3) o.walk += dt * (o.lg >= 2 || o.ps === 2 ? 6 : 11);
@@ -1512,6 +1564,8 @@ function frame(t){
   // 캐릭터 (분쇄된 캐릭터/전차 탑승 중인 캐릭터는 그리지 않음 / 내 닉네임 앞에는 🟢 온라인 표시)
   for (const id in others){ const o = others[id]; if (!o.gib){ if (o.tk >= 0) drawTank(o, o.th, o.n || id.slice(0, 3)); else person(o, o.n || id.slice(0, 3)); } }
   if (!me.gib){ if (me.tk >= 0) drawTank(me, me.thp, '🟢 ' + me.n); else person(me, '🟢 ' + me.n); }
+  for (const id in others) drawEmote(others[id]);
+  if (!me.gib) drawEmote(me);
   // 활 차징 중: 예상 포물선 궤적
   if (me.cv > 0 && me.tk < 0 && me.hp > 0 && WEAPONS[me.w].chg){
     const wp = WEAPONS[me.w], v = bowVel(wp, me.cv, me.f, me.aim), sh = isProne(me) ? 14 : me.ps === 1 ? 40 : 64;

@@ -78,7 +78,7 @@ const WORLD = 3000, GRAV = 1500, SPEED = 190, JUMP = 560, PARRY = .16;
    SV_SLOW: 누군가 산데비스탄을 켜면 켜지 않은 모든 것(플레이어·탄·비·이펙트)이 이 배율로 느려짐
    SVK:     산데비스탄 사용자의 시간 배율 (다른 사람이 느려진 만큼 + 조금 더 빠름)
    서로 켜면 둘 다 SVK 로 같은 속도 → 동등하게 움직임                                       */
-const SV_SLOW = .3, SVK = 1.5;
+const SV_SLOW = .0.15, SVK = 1.7;
 const BOW_MIN = .05;   // 활 조준각 최저(거의 수평) / 최고는 1.25 (약 72°)
 let wsc = 1, svAny = false;                       // wsc: 현재 월드 시간 배율 (부드럽게 변함)
 const tsOf = p => p.sv ? SVK : wsc;               // 해당 플레이어의 시간 배율
